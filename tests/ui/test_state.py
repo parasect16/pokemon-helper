@@ -41,7 +41,8 @@ def test_app_state_default_has_six_empty_slots() -> None:
     assert len(state.team) == TEAM_SIZE
     assert all(slot is None for slot in state.team)
     assert state.generation == DEFAULT_GENERATION
-    assert state.click_through is False
+    assert state.overlay_x is None
+    assert state.overlay_y is None
 
 
 def test_app_state_rejects_out_of_range_generation() -> None:
@@ -115,12 +116,34 @@ def test_state_store_roundtrip_preserves_full_state(tmp_path: Path) -> None:
         ],
         overlay_x=100,
         overlay_y=200,
-        click_through=True,
     )
     store = StateStore(tmp_path / "state.json")
     store.save(original)
     restored = store.load()
     assert restored == original
+
+
+def test_state_store_ignores_unknown_keys(tmp_path: Path) -> None:
+    """Vecchie chiavi (es. click_through) vengono ignorate senza errori."""
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps(
+            {
+                "generation": 3,
+                "team": [None] * TEAM_SIZE,
+                "overlay_x": 10,
+                "overlay_y": 20,
+                "click_through": True,  # chiave morta, deve essere ignorata
+                "future_key": "whatever",
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = StateStore(path)
+    state = store.load()
+    assert state.generation == 3
+    assert state.overlay_x == 10
+    assert state.overlay_y == 20
 
 
 def test_state_store_load_returns_default_on_corrupt_json(tmp_path: Path) -> None:
@@ -149,7 +172,6 @@ def test_state_store_load_returns_default_on_invalid_values(tmp_path: Path) -> N
                 "team": [None] * TEAM_SIZE,
                 "overlay_x": None,
                 "overlay_y": None,
-                "click_through": False,
             }
         ),
         encoding="utf-8",
@@ -185,7 +207,6 @@ def test_state_store_deserializes_team_slots(tmp_path: Path) -> None:
                 ],
                 "overlay_x": None,
                 "overlay_y": None,
-                "click_through": False,
             }
         ),
         encoding="utf-8",

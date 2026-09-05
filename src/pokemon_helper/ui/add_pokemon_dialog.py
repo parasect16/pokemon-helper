@@ -2,11 +2,13 @@
 
 Comportamento del filtro:
 
-- Senza testo di ricerca: mostra solo i Pokemon **introdotti nella
-  generazione selezionata** (strict, `generation_introduced == gen`).
+- Senza testo di ricerca: mostra i Pokemon delle generazioni "compatibili"
+  con quella selezionata (vedi `GENERATION_COMPATIBILITY`). La mappa tiene
+  conto dei remake: es. Gen 3 comprende Gen 1 perché FireRed / LeafGreen
+  sono remake dei giochi Gen 1 e permettono di catturare Pokemon Gen 1.
 - Con testo di ricerca: estende la lista a **tutti i Pokemon fino a quella
-  generazione** (`generation_introduced <= gen`) per permettere di aggiungere
-  Pokemon ottenuti tramite scambio da generazioni precedenti.
+  generazione** (`generation_introduced <= gen`) per coprire Pokemon
+  ottenuti tramite scambio.
 
 Restituisce un `TeamSlot` con id e livello scelti, o `None` se annullato.
 """
@@ -30,6 +32,25 @@ from PySide6.QtWidgets import (
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.ui.state import MAX_LEVEL, MIN_LEVEL, TeamSlot
 from pokemon_helper.ui.types_meta import label_it
+
+# Generazioni "compatibili" per il filtro di default. Per ogni gen selezionata
+# elenca le generazioni di introduzione da cui pescare i Pokemon disponibili
+# nei giochi principali di quella gen:
+# - Gen 1: solo Gen 1.
+# - Gen 2: Gen 1 (Time Capsule) + Gen 2.
+# - Gen 3: Gen 1 (remake FireRed/LeafGreen) + Gen 3 (Ruby/Sapphire/Emerald).
+#   La Gen 2 viene esclusa dal default perché i suoi Pokemon non sono
+#   catturabili nei giochi principali di Gen 3 senza scambi esterni.
+# - Gen 4: Gen 1-4. HeartGold/SoulSilver rendono disponibili i Pokemon Gen 2;
+#   il Pal Park e il National Dex di Diamond/Pearl/Platinum sbloccano Gen 3.
+# - Gen 5: Gen 1-5 tramite trasferimento in Black/White/BW2.
+GENERATION_COMPATIBILITY: dict[int, frozenset[int]] = {
+    1: frozenset({1}),
+    2: frozenset({1, 2}),
+    3: frozenset({1, 3}),
+    4: frozenset({1, 2, 3, 4}),
+    5: frozenset({1, 2, 3, 4, 5}),
+}
 
 
 class AddPokemonDialog(QDialog):
@@ -56,12 +77,11 @@ class AddPokemonDialog(QDialog):
         self._generation = generation
         # Cache: due sottoinsiemi tenuti in memoria (≤649 righe totali).
         # `_all_pokemon`: tutti i Pokemon disponibili fino alla gen (per la
-        # ricerca cross-gen). `_strict_pokemon`: solo quelli introdotti in
-        # questa specifica generazione (default a tendina).
+        # ricerca cross-gen). `_strict_pokemon`: quelli catturabili nei giochi
+        # principali della gen selezionata secondo GENERATION_COMPATIBILITY.
         self._all_pokemon = repository.list_by_generation(generation)
-        self._strict_pokemon = [
-            p for p in self._all_pokemon if p.generation_introduced == generation
-        ]
+        compat = GENERATION_COMPATIBILITY.get(generation, frozenset({generation}))
+        self._strict_pokemon = [p for p in self._all_pokemon if p.generation_introduced in compat]
 
         self._build_ui(initial)
         self._populate_list(filter_text="")
@@ -131,9 +151,14 @@ class AddPokemonDialog(QDialog):
             )
         else:
             source = self._strict_pokemon
+            compat = sorted(
+                GENERATION_COMPATIBILITY.get(self._generation, frozenset({self._generation}))
+            )
+            compat_str = ", ".join(f"G{g}" for g in compat)
             self._info_label.setText(
-                f"{len(self._strict_pokemon)} Pokemon di Gen {self._generation} "
-                "(scrivi per cercare anche in gen precedenti)"
+                f"{len(self._strict_pokemon)} Pokemon disponibili in Gen "
+                f"{self._generation} ({compat_str}) — scrivi per cercare in "
+                "tutte le gen"
             )
 
         self._list.clear()

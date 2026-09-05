@@ -1,16 +1,16 @@
-"""Pannello squadra: header (gen picker, toggle, chiudi) + sei slot.
+"""Pannello squadra: header (gen picker) + sei slot + sezione avversario.
 
 Il widget è puramente presentazionale sopra `AppState`: legge lo stato
 corrente dall'esterno, mostra i sei slot con nome/tipi/livello e apre
-`AddPokemonDialog` per assegnare o modificare uno slot.
+`AddPokemonDialog` per assegnare o modificare uno slot. La finestra
+contenitrice (`CompanionWindow`) fornisce chrome nativo (drag, minimize,
+close) quindi qui non c'è più né title bar custom né pulsante chiudi.
 
 Segnali emessi verso l'app layer, che li usa per aggiornare `AppState` e
 persistere:
 
 - `generationChanged(int)`
 - `slotChanged(int, TeamSlot | None)` — index in [0, 5], None per rimozione
-- `clickThroughToggled(bool)`
-- `closeRequested()`
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
     QFrame,
@@ -48,11 +47,12 @@ class TeamPanel(QWidget):
 
     generationChanged = Signal(int)
     slotChanged = Signal(int, object)  # (index, TeamSlot | None)
-    clickThroughToggled = Signal(bool)
-    closeRequested = Signal()
 
     def __init__(
-        self, repository: PokemonRepository, state: AppState, parent: QWidget | None = None
+        self,
+        repository: PokemonRepository,
+        state: AppState,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._repository = repository
@@ -67,19 +67,11 @@ class TeamPanel(QWidget):
 
     def _build_ui(self) -> None:
         self.setObjectName("teamPanel")
-        # Sfondo scuro opaco + bordi arrotondati. La title bar sopra ha un
-        # colore leggermente diverso per segnalarla come area di drag.
+        # Sfondo scuro opaco per il pannello. La finestra ospitante fornisce
+        # bordi e chrome nativi Windows.
         self.setStyleSheet(
             """
-            #teamPanel {
-                background-color: rgb(20, 20, 30);
-                border-radius: 12px;
-            }
-            #titleBar {
-                background-color: rgb(38, 38, 54);
-                border-top-left-radius: 12px;
-                border-top-right-radius: 12px;
-            }
+            #teamPanel { background-color: rgb(24, 24, 34); }
             QLabel { color: #EAEAEA; }
             QPushButton {
                 background-color: #303044;
@@ -105,85 +97,25 @@ class TeamPanel(QWidget):
                 selection-background-color: #40405a;
                 border: 1px solid #4a4a5f;
             }
-            QCheckBox { color: #EAEAEA; }
-            QCheckBox::indicator {
-                width: 14px;
-                height: 14px;
-                background-color: #303044;
-                border: 1px solid #4a4a5f;
-                border-radius: 3px;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #6890F0;
-                border: 1px solid #6890F0;
-            }
             """
         )
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 10)
+        outer.setContentsMargins(10, 8, 10, 10)
         outer.setSpacing(6)
 
-        outer.addWidget(self._build_title_bar())
+        outer.addLayout(self._build_header())
 
-        header_container = QHBoxLayout()
-        header_container.setContentsMargins(10, 0, 10, 0)
-        header_container.addLayout(self._build_header())
-        outer.addLayout(header_container)
-
-        slots_container = QVBoxLayout()
-        slots_container.setContentsMargins(10, 0, 10, 0)
-        slots_container.setSpacing(6)
         for index in range(TEAM_SIZE):
             slot = TeamSlotWidget(index, self._repository, self._state.generation)
             slot.assignRequested.connect(self._open_dialog_for_slot)
             slot.removeRequested.connect(self._clear_slot)
             self._slots.append(slot)
-            slots_container.addWidget(slot)
-        outer.addLayout(slots_container)
+            outer.addWidget(slot)
 
         # Sezione avversario: placeholder finché F4 non imposta un ID.
-        opponent_container = QHBoxLayout()
-        opponent_container.setContentsMargins(10, 0, 10, 0)
         self._opponent_panel = OpponentPanel(self._repository, self._state)
-        opponent_container.addWidget(self._opponent_panel)
-        outer.addLayout(opponent_container)
-
-    def _build_title_bar(self) -> QWidget:
-        """Barra superiore solida: label + area drag + pulsante chiudi."""
-        bar = QWidget(self)
-        bar.setObjectName("titleBar")
-        bar.setFixedHeight(28)
-
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(10, 0, 6, 0)
-        layout.setSpacing(4)
-
-        # Icona-grip (usa un carattere unicode al posto di un asset).
-        grip = QLabel("⋮⋮", bar)
-        grip.setStyleSheet("color: #7a7a8a; font-size: 12px;")
-        layout.addWidget(grip)
-
-        title = QLabel("pokemon-helper", bar)
-        title.setStyleSheet("color: #EAEAEA; font-weight: bold;")
-        layout.addWidget(title)
-
-        layout.addStretch(1)
-
-        close_btn = QPushButton("×", bar)
-        close_btn.setFixedSize(22, 22)
-        close_btn.setToolTip("Chiudi")
-        close_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; color: #EAEAEA; "
-            "font-size: 14px; }"
-            "QPushButton:hover { background: #c02020; border-radius: 4px; }"
-        )
-        # Lambda esplicita: `clicked` emette `bool`, `closeRequested.emit()` no
-        # arg — la lambda scarta il bool per evitare mismatch di arità.
-        close_btn.clicked.connect(lambda: self.closeRequested.emit())
-        layout.addWidget(close_btn)
-
-        return bar
+        outer.addWidget(self._opponent_panel)
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -197,12 +129,6 @@ class TeamPanel(QWidget):
         header.addWidget(self._gen_combo)
 
         header.addStretch(1)
-
-        self._click_through_check = QCheckBox("Click-through", self)
-        self._click_through_check.setChecked(self._state.click_through)
-        self._click_through_check.toggled.connect(self.clickThroughToggled.emit)
-        header.addWidget(self._click_through_check)
-
         return header
 
     # -------------------------------------------------------- aggiornamento
@@ -213,9 +139,6 @@ class TeamPanel(QWidget):
         self._gen_combo.blockSignals(True)
         self._gen_combo.setCurrentIndex(state.generation - MIN_GENERATION)
         self._gen_combo.blockSignals(False)
-        self._click_through_check.blockSignals(True)
-        self._click_through_check.setChecked(state.click_through)
-        self._click_through_check.blockSignals(False)
         self._refresh_slots()
 
     def _refresh_slots(self) -> None:
@@ -229,16 +152,6 @@ class TeamPanel(QWidget):
         """API pubblica per impostare l'avversario (chiamata da F4 in futuro)."""
         if self._opponent_panel is not None:
             self._opponent_panel.set_opponent(pokemon_id)
-
-    def sync_click_through(self, enabled: bool) -> None:
-        """Aggiorna la checkbox senza riemettere il segnale (evita loop).
-
-        Usato quando lo stato del click-through cambia dall'esterno (es.
-        hotkey globale) e la UI deve rispecchiare il nuovo valore.
-        """
-        self._click_through_check.blockSignals(True)
-        self._click_through_check.setChecked(enabled)
-        self._click_through_check.blockSignals(False)
 
     # ------------------------------------------------------------- handler
 

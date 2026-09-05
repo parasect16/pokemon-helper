@@ -1,8 +1,8 @@
 """Stato dell'applicazione e persistenza su JSON.
 
 Definisce il modello di stato (squadra, generazione selezionata, posizione
-overlay, click-through) e uno `StateStore` che lo serializza in un file JSON
-sotto `%APPDATA%\\pokemon-helper\\state.json`.
+finestra) e uno `StateStore` che lo serializza in un file JSON sotto
+`%APPDATA%\\pokemon-helper\\state.json`.
 
 Le funzioni sono pure: non fanno side effect verso Qt né usano thread. Il
 salvataggio è invocato esplicitamente dai chiamanti (ad esempio all'uscita
@@ -48,7 +48,6 @@ class AppState:
     team: list[TeamSlot | None] = field(default_factory=lambda: [None] * TEAM_SIZE)
     overlay_x: int | None = None
     overlay_y: int | None = None
-    click_through: bool = False
 
     def __post_init__(self) -> None:
         if not MIN_GENERATION <= self.generation <= MAX_GENERATION:
@@ -123,12 +122,15 @@ def _serialize(state: AppState) -> dict:
         ],
         "overlay_x": state.overlay_x,
         "overlay_y": state.overlay_y,
-        "click_through": state.click_through,
     }
 
 
 def _deserialize(payload: dict) -> AppState:
-    """Rigenera `AppState` da un dict letto dal JSON."""
+    """Rigenera `AppState` da un dict letto dal JSON.
+
+    Chiavi non riconosciute (es. `click_through` di versioni precedenti)
+    vengono ignorate silenziosamente per non rompere i file di stato esistenti.
+    """
     raw_team = payload["team"]
     if not isinstance(raw_team, list):
         raise TypeError("team must be a list")
@@ -143,7 +145,6 @@ def _deserialize(payload: dict) -> AppState:
         team=team,
         overlay_x=_optional_int(payload.get("overlay_x")),
         overlay_y=_optional_int(payload.get("overlay_y")),
-        click_through=bool(payload.get("click_through", False)),
     )
 
 

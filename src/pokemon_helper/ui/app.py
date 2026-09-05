@@ -3,7 +3,7 @@
 Responsabilità:
 - caricare lo stato persistente (`StateStore`);
 - aprire il repository SQLite;
-- costruire `TeamPanel` e infilarlo in un `OverlayWindow`;
+- costruire `TeamPanel` e infilarlo in una `CompanionWindow`;
 - collegare i segnali della UI al salvataggio dello stato;
 - registrare la hotkey globale (`GlobalHotkey`) per il toggle di visibilità;
 - avviare il loop Qt.
@@ -24,13 +24,8 @@ from PySide6.QtWidgets import QApplication
 
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.ui.hotkey import DEFAULT_TOGGLE_COMBO, GlobalHotkey
-from pokemon_helper.ui.overlay import OverlayWindow
-from pokemon_helper.ui.state import (
-    AppState,
-    StateStore,
-    TeamSlot,
-    default_state_path,
-)
+from pokemon_helper.ui.overlay import CompanionWindow
+from pokemon_helper.ui.state import AppState, StateStore, TeamSlot, default_state_path
 from pokemon_helper.ui.team_panel import TeamPanel
 
 
@@ -54,10 +49,9 @@ def run() -> int:
     """Punto d'ingresso: avvia l'applicazione. Ritorna l'exit code di Qt."""
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("pokemon-helper")
-    # NB: la finestra ha flag `Qt.Tool` che Qt esclude dal conteggio di
-    # `quitOnLastWindowClosed`. Chiediamo quindi un quit esplicito nel
-    # wiring dei segnali di chiusura invece di affidarci al default.
-    app.setQuitOnLastWindowClosed(False)
+    # Con chrome nativo la finestra ha entry in taskbar: quando l'utente
+    # preme la X di sistema, `quitOnLastWindowClosed` si prende cura del quit.
+    app.setQuitOnLastWindowClosed(True)
 
     db_path = default_db_path()
     if not db_path.exists():
@@ -72,18 +66,15 @@ def run() -> int:
     repository = PokemonRepository.open(db_path)
 
     team_panel = TeamPanel(repository, state)
-    overlay = OverlayWindow(team_panel)
+    window = CompanionWindow(team_panel)
 
-    _restore_geometry(app, overlay, state)
-    overlay.show()
-    # Il click-through va applicato dopo `show()` per avere un winId valido.
-    if state.click_through:
-        overlay.set_click_through(True)
+    _restore_geometry(app, window, state)
+    window.show()
 
-    _wire_persistence(overlay, team_panel, state, store, app)
+    _wire_persistence(window, team_panel, state, store)
 
     bridge = _HotkeyBridge()
-    bridge.toggled.connect(overlay.hotkey_toggle)
+    bridge.toggled.connect(window.toggle_visibility)
     hotkey = GlobalHotkey(DEFAULT_TOGGLE_COMBO, bridge.toggled.emit)
     hotkey.start()
 
@@ -106,26 +97,25 @@ def run() -> int:
 # ---------------------------------------------------------------------------
 
 
-def _restore_geometry(app: QApplication, overlay: OverlayWindow, state: AppState) -> None:
+def _restore_geometry(app: QApplication, window: CompanionWindow, state: AppState) -> None:
     """Posiziona la finestra: coordinate salvate o angolo alto-destra."""
     if state.overlay_x is not None and state.overlay_y is not None:
-        overlay.move_to(state.overlay_x, state.overlay_y)
+        window.move_to(state.overlay_x, state.overlay_y)
         return
     screen = app.primaryScreen()
     if screen is None:
         return
     geometry = screen.availableGeometry()
-    overlay.move_to(geometry.right() - 380, geometry.top() + 40)
+    window.move_to(geometry.right() - 380, geometry.top() + 40)
 
 
 def _wire_persistence(
-    overlay: OverlayWindow,
+    window: CompanionWindow,
     team_panel: TeamPanel,
     state: AppState,
     store: StateStore,
-    app: QApplication,
 ) -> None:
-    """Collega i segnali della UI alla scrittura su disco e al quit."""
+    """Collega i segnali della UI alla scrittura su disco dello stato."""
 
     def persist() -> None:
         store.save(state)
@@ -136,35 +126,13 @@ def _wire_persistence(
         persist()
 
     def on_generation(_gen: int) -> None:
-        # state.generation è già stato aggiornato da TeamPanel.
+        # `state.generation` è già stato aggiornato da TeamPanel.
         persist()
 
     def on_slot(_index: int, _slot: TeamSlot | None) -> None:
-        # state.team è già stato aggiornato da TeamPanel.
+        # `state.team` è già stato aggiornato da TeamPanel.
         persist()
 
-    def on_checkbox_toggled(enabled: bool) -> None:
-        # Sorgente: click utente sulla checkbox in header. Applica all'overlay;
-        # sarà `overlay.clickThroughChanged` a occuparsi di persistere.
-        overlay.set_click_through(enabled)
-
-    def on_click_through_changed(enabled: bool) -> None:
-        # Sorgente unica di verità: l'overlay emette dopo qualsiasi cambio
-        # (checkbox utente o hotkey). Sincronizza checkbox + salva stato.
-        team_panel.sync_click_through(enabled)
-        state.click_through = enabled
-        persist()
-
-    def on_close() -> None:
-        # `Qt.Tool` non conta per quitOnLastWindowClosed: chiediamo quit
-        # esplicito. Evitiamo `overlay.close()`: con overlay traslucido +
-        # click-through poteva bloccare il teardown, mentre `app.quit()`
-        # da solo chiude il loop e il finally in `run()` fa il resto.
-        app.quit()
-
-    overlay.positionChanged.connect(on_position)
-    overlay.clickThroughChanged.connect(on_click_through_changed)
+    window.positionChanged.connect(on_position)
     team_panel.generationChanged.connect(on_generation)
     team_panel.slotChanged.connect(on_slot)
-    team_panel.clickThroughToggled.connect(on_checkbox_toggled)
-    team_panel.closeRequested.connect(on_close)
