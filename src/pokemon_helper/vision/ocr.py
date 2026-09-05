@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 if TYPE_CHECKING:
     from rapidocr import RapidOCR
@@ -48,13 +48,33 @@ class OcrEngine:
             self._engine = RapidOCR()
         return self._engine
 
-    def recognize(self, image: Image.Image) -> list[OcrResult]:
+    def recognize(
+        self,
+        image: Image.Image,
+        *,
+        upscale: int = 1,
+        high_contrast: bool = False,
+    ) -> list[OcrResult]:
         """Riconosce tutte le righe di testo presenti in `image`.
 
-        L'immagine viene passata come `numpy.ndarray` RGB a RapidOCR.
-        Se non trova nulla, ritorna lista vuota (mai `None`).
+        - `upscale` (default 1 = niente resize) ingrandisce l'immagine con
+          LANCZOS prima di passarla al motore. Utile su font pixel piccoli:
+          RapidOCR beneficia molto dall'input più grande.
+        - `high_contrast=True` converte in grayscale + auto-contrast +
+          invert (se lo sfondo è più scuro del testo). Utile per il livello
+          `L.XX` bianco su blu del menu Pokemon.
         """
         rgb = image.convert("RGB")
+        if high_contrast:
+            gray = ImageOps.autocontrast(rgb.convert("L"))
+            # Inverti se lo sfondo (mediana dei pixel) è più scuro del centro.
+            arr = np.asarray(gray)
+            if arr.mean() < 128:
+                gray = ImageOps.invert(gray)
+            rgb = gray.convert("RGB")
+        if upscale > 1:
+            new_size = (rgb.width * upscale, rgb.height * upscale)
+            rgb = rgb.resize(new_size, Image.Resampling.LANCZOS)
         array = np.asarray(rgb)
 
         engine = self._ensure_engine()
@@ -64,9 +84,9 @@ class OcrEngine:
         raw = engine(array)
         return list(_iter_results(raw))
 
-    def best_text(self, image: Image.Image) -> OcrResult | None:
+    def best_text(self, image: Image.Image, *, upscale: int = 1) -> OcrResult | None:
         """Restituisce la riga con confidenza più alta, o `None` se vuota."""
-        results = self.recognize(image)
+        results = self.recognize(image, upscale=upscale)
         if not results:
             return None
         return max(results, key=lambda r: r.confidence)

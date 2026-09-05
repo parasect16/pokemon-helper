@@ -83,24 +83,25 @@ class TeamMenuRois:
     """ROI degli slot squadra nella schermata elenco Pokemon.
 
     - `slot_areas`: 6 rettangoli che coprono nome + livello di ciascun slot.
-      OCR sul crop → due righe (nome, livello), disambiguate dal recognizer.
-    - `slot_icons`: 6 rettangoli sulle mini icone del menu (una per slot).
-      Usati come **fallback** dal recognizer quando l'OCR nome non trova un
-      match affidabile (es. Pokemon con nickname personalizzato).
+    - `slot_icons`: 6 rettangoli sulle mini icone del menu (fallback quando
+      l'OCR nome non trova match — es. nickname personalizzati).
+    - `slot_levels`: 6 rettangoli tight sul solo indicatore di livello
+      ("L.XX"). Un'OCR dedicata su un crop piccolo migliora molto la
+      detection del numero rispetto a leggere l'intera area slot.
     """
 
     slot_areas: tuple[Roi, ...]
     slot_icons: tuple[Roi, ...]
+    slot_levels: tuple[Roi, ...]
 
     def __post_init__(self) -> None:
-        if len(self.slot_areas) != TEAM_SIZE:
-            raise ValueError(
-                f"team menu must define {TEAM_SIZE} slot areas, got {len(self.slot_areas)}"
-            )
-        if len(self.slot_icons) != TEAM_SIZE:
-            raise ValueError(
-                f"team menu must define {TEAM_SIZE} slot icons, got {len(self.slot_icons)}"
-            )
+        for name, coll in (
+            ("slot_areas", self.slot_areas),
+            ("slot_icons", self.slot_icons),
+            ("slot_levels", self.slot_levels),
+        ):
+            if len(coll) != TEAM_SIZE:
+                raise ValueError(f"team menu must define {TEAM_SIZE} {name}, got {len(coll)}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +164,16 @@ ROIS_FIRERED = GameRois(
             Roi(x=0.406, y=0.394, w=0.068, h=0.088),
             Roi(x=0.406, y=0.537, w=0.068, h=0.088),
             Roi(x=0.406, y=0.680, w=0.068, h=0.088),
+        ),
+        slot_levels=(
+            # Slot 1 (box attivo): "L.25" sotto il nome dentro il box.
+            Roi(x=0.166, y=0.346, w=0.072, h=0.055),
+            # Slot 2-6: "L.XX" sotto il nome, colonna fissa a destra dell'icona.
+            Roi(x=0.510, y=0.204, w=0.090, h=0.055),
+            Roi(x=0.510, y=0.353, w=0.090, h=0.055),
+            Roi(x=0.510, y=0.502, w=0.090, h=0.055),
+            Roi(x=0.510, y=0.651, w=0.090, h=0.055),
+            Roi(x=0.510, y=0.801, w=0.090, h=0.055),
         ),
     ),
 )

@@ -137,11 +137,19 @@ class Recognizer:
         game_area = compute_game_area(frame.width, frame.height, layout)
         results: list[TeamRecognition] = []
         slot_icons = rois.team_menu.slot_icons
+        slot_levels = rois.team_menu.slot_levels
         for index, slot_roi in enumerate(rois.team_menu.slot_areas):
             crop = frame.crop(roi_to_pixels(slot_roi, game_area).as_crop_box())
             ocr_lines = self._ocr.recognize(crop)
             name_text = _pick_name_text(ocr_lines)
-            level = _extract_level(ocr_lines)
+
+            # OCR dedicata sul crop del livello con preprocessing forte:
+            # `high_contrast=True` normalizza il testo bianco-su-blu del menu
+            # in nero-su-bianco standard; `upscale=4` porta i glifi pixel
+            # piccoli a dimensioni digeribili da RapidOCR.
+            level_crop = frame.crop(roi_to_pixels(slot_levels[index], game_area).as_crop_box())
+            level_lines = self._ocr.recognize(level_crop, upscale=4, high_contrast=True)
+            level = _extract_level(level_lines) or _extract_level(ocr_lines)
 
             pokemon_id: int | None = None
             confidence = 0.0
@@ -260,8 +268,9 @@ def _extract_level(ocr_lines: list[OcrResult]) -> int | None:
 
     Priorità:
     1. Pattern `L.XX` / `Lv.XX` (l'OCR spesso lo restituisce così).
-    2. Riga composta solo di cifre in [1, 100] (RapidOCR ogni tanto scarta il
-       prefisso "L." su font pixel piccoli).
+    2. Riga con solo cifre in [1, 100].
+    3. Riga di 3 cifre che inizia con `1`: probabile misread della `L` di
+       `L.XX` come cifra `1`; scarta la prima cifra e riprova (es. `137` → 37).
     """
     for result in ocr_lines:
         match = _LEVEL_EXTRACT.search(result.text)
@@ -277,6 +286,17 @@ def _extract_level(ocr_lines: list[OcrResult]) -> int | None:
         if text.isdigit():
             try:
                 level = int(text)
+            except ValueError:
+                continue
+            if 1 <= level <= 100:
+                return level
+    # Fallback: `L.XX` letto come `1XX` (L → 1). Se la stringa è di 3 cifre
+    # che iniziano per 1 (100-199), togli la prima e prova come livello 0-99.
+    for result in ocr_lines:
+        text = result.text.strip()
+        if len(text) == 3 and text.isdigit() and text.startswith("1"):
+            try:
+                level = int(text[1:])
             except ValueError:
                 continue
             if 1 <= level <= 100:
