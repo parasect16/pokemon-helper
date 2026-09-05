@@ -116,7 +116,9 @@ Ogni slot della squadra conserva l'id del Pokemon e il livello (1-100). La gener
 - `Ctrl+Alt+R`: cattura schermo mGBA + riconoscimento avversario + Pokemon del giocatore (F3.7).
 - `Ctrl+Alt+T`: cattura schermo mGBA + riconoscimento intera squadra dal menu Pokemon (F3.8).
 
-`OpponentPanel` mostra la tabella difesa/offesa per ciascun membro squadra vs avversario (placeholder "Combattimento non in corso" quando nessun avversario è impostato). Lo slot squadra corrispondente al Pokemon in campo viene evidenziato.
+`OpponentPanel` mostra due card affiancate (player attivo | avversario) quando entrambi i Pokemon in campo sono noti: ciascuna card ha sprite front dal Pokedex, nome, tipi e lista di efficacia difensiva (Debolezze / Resistenze / Immune, tipi con moltiplicatore 1× esclusi). Placeholder "Combattimento non in corso" quando manca l'avversario, "Player in campo sconosciuto" quando manca il player.
+
+Il pannello espone due pulsanti sopra il selettore Gen — `⟳ Squadra` e `⚔ Avversario` — equivalenti alle hotkey. Feedback visuale su ciascun pulsante: ✓ verde per 10 s in caso di successo, ⚠ giallo (con tooltip col motivo) per 10 s in caso di fallimento. Lo slot squadra corrispondente al Pokemon in campo viene evidenziato.
 
 ### F3 — Riconoscimento (in corso, stato dettagliato)
 
@@ -134,6 +136,9 @@ Sotto-fasi:
 - **F3.8 (fatto)** — Riconoscimento intera squadra dal menu Pokemon con `Ctrl+Alt+T`: OCR per ciascuno dei 6 slot, fuzzy match, `_apply_team_recognition` sovrascrive `state.team` preservando gli slot con nickname sconosciuti. Test live: 5/6 Pokemon con nome default riconosciuti correttamente al primo tentativo.
 - **F3.9 (in corso, best-effort)** — Fallback pHash su icona menu quando OCR nome fallisce (utile per Pokemon con nickname personalizzato). Schema `sprite_hashes.side` esteso ad accettare `icon`, indice popolato da `PokeAPI/sprites/versions/generation-{roman}/icons/`. Preprocessing HSV color-key rimuove il pattern teal del menu FRLG prima del hash. Al momento le distanze restano alte (≥18-24 anche per il match corretto): il match icon non è affidabile e va valutato se investire in template matching per game.
 - **F3.10 (limitazione nota)** — Detection del livello `L.XX` sui font pixel FRLG resta poco affidabile con RapidOCR. Aggiunte le ROI dedicate `slot_levels` e il preprocessing `high_contrast + upscale` sull'engine OCR, ma solo alcuni slot riescono a produrre il numero. `_apply_team_recognition` preserva il livello precedente per lo slot quando l'OCR fallisce; l'utente può modificarlo manualmente via il pulsante `…`. Alternative future: template matching per singolo digit o cambio del motore OCR.
+- **F3.11 (fatto)** — Il player attivo in campo può essere solo uno dei 6 membri della squadra: `Recognizer.recognize_player` accetta `restrict_to_ids` per filtrare i candidati fuzzy + pHash a quell'insieme, con soglie più permissive quando ristretto. L'app passa sempre il set derivato da `state.team`.
+- **F3.12 (fatto)** — Guardia anti-sovrascrittura sul recognize squadra: se meno di 3/6 slot hanno OCR text di lunghezza ≥ 3, la squadra corrente **non** viene sovrascritta (siamo probabilmente fuori dalla schermata elenco Pokemon). Il pulsante ⟳ Squadra riceve un flash ⚠ giallo per 10 s con il motivo in tooltip.
+- **F3.13 (fatto)** — Riprogettazione grafica di `OpponentPanel`: due card affiancate con sprite Pokedex, tipi e tabella efficacia colorata + pulsanti reload in header. Renderer badge condivisi in `ui.types_meta` (`render_type_badge`, `render_type_badges`, `text_color_for` per contrasto testo automatico).
 
 ### F4 — Rilevamento automatico del combattimento (da fare)
 

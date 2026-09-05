@@ -100,21 +100,33 @@ python -m pokemon_helper            # smoke test entry-point
 
 ## Dati e asset
 
-- Il dataset generato (`data/*.sqlite`, `data/sprites/`) è **gitignored**.
-- Gli script che generano il dataset stanno in `scripts/` e devono essere idempotenti.
-- Riferimento dati esterni: PokeAPI dump statico (vedi `PLAN.md` §4).
+- Il dataset generato (`data/*.sqlite`) e le directory di vendoring (`data/vendor/`, `data/sprites/`) sono **gitignored**. Anche le PNG diagnostiche prodotte dagli script sotto `data/` sono ignorate (`data/*.png`).
+- Gli script che generano il dataset stanno in `scripts/` e devono essere idempotenti (`build_dataset.py`, `build_sprite_index.py`).
+- Riferimento dati esterni:
+  - `veekun/pokedex` (shallow clone, ~15 MB) per i dati tabulari — vedi `scripts/build_dataset.py`.
+  - `PokeAPI/sprites` (sparse clone dei soli `generation-{i..v}`, ~500 MB con animazioni Gen 5) per sprite battaglia + icone menu — vedi `scripts/build_sprite_index.py`.
+- Il DB SQLite finale è `data/pokemon.sqlite` con tabelle `pokemon`, `pokemon_types_by_gen`, `sprite_hashes` (front/back/icon).
+
+## Line endings
+
+- `.gitattributes` forza `* text=auto eol=lf` per silenziare i warning CRLF/LF su Windows. Non toccare `core.autocrlf`.
 
 ## Ambiente di esecuzione
 
 - **F0, F1**: pura logica Python, eseguibile ovunque (anche WSL).
 - **F2, F3, F4**: Windows nativo obbligatorio (overlay, capture, hotkey). Vedi `PLAN.md` §3.
 
-Le dipendenze Windows-only (`PySide6`, `windows-capture`, `rapidocr-onnxruntime`, ecc.)
-vengono aggiunte al gruppo `[project.optional-dependencies].app` solo a partire da F2.
+Extras opzionali:
+
+- `[dev]` (dev+CI): `pytest`, `pytest-cov`, `ruff`, `pre-commit`.
+- `[app]` (overlay Windows F2): `PySide6>=6.7`, `pynput>=1.7`.
+- `[vision]` (F0.2 sprite indexing + F3 runtime): `Pillow>=10`, `imagehash>=4.3`, `windows-capture>=1.4` (Windows-only), `rapidocr>=3.9`, `onnxruntime>=1.19`. Il pacchetto `rapidocr-onnxruntime` legacy non ha wheel per Python 3.14.
+
+Installazione tipica sviluppo Windows: `pip install -e ".[dev,app,vision]"`.
 
 ## Note per Claude
 
 - In caso di dubbio su convenzioni, scope, scelte architetturali: **fermati e chiedi**.
 - Non introdurre dipendenze runtime senza discuterle prima.
-- Non aggiungere file `.md` di planning/analisi intermedi: usa il contesto della chat.
+- Non aggiungere file `.md` di planning/analisi intermedi: usa il contesto della chat. Eccezioni permanenti: `HANDOFF.md` (stato del progetto per una nuova sessione) e `TODO.md` (memoria intermedia di attività in corso o da fare, aggiornata a fine sessione).
 - Commit conventional puntuali durante il lavoro, non un unico commit gigante a fine sessione.
