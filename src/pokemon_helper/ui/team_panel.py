@@ -244,6 +244,9 @@ class TeamPanel(QWidget):
         Se `pokemon_id` non compare fra gli slot popolati (Pokemon non in
         squadra), nessuno slot risulta evidenziato — è un no-op silenzioso.
         Passando `None` si rimuove l'evidenziazione.
+
+        Propaga anche a `OpponentPanel` così la tabella matchup si aggiorna
+        per mostrare solo la coppia (avversario, player attivo).
         """
         self._active_player_id = pokemon_id
         for index, slot_widget in enumerate(self._slots):
@@ -251,6 +254,8 @@ class TeamPanel(QWidget):
             slot_widget.set_active(
                 slot is not None and pokemon_id is not None and slot.pokemon_id == pokemon_id
             )
+        if self._opponent_panel is not None:
+            self._opponent_panel.set_active_player(pokemon_id)
 
     # ------------------------------------------------------------- handler
 

@@ -1,17 +1,18 @@
 """Sezione avversario del pannello overlay.
 
-Due modalità di visualizzazione, alternate via `set_opponent`:
+Tre stati di visualizzazione:
 
-- **Nessun avversario** (default e caso F2): mostra il placeholder
-  "Combattimento non in corso".
-- **Avversario impostato** (via `set_opponent(pokemon_id)`, in futuro
-  chiamato automaticamente da F4): mostra nome + tipi + tabella con difesa
-  (max moltiplicatore in ingresso dagli STAB avversari) e offesa (max
-  moltiplicatore in uscita con gli STAB del membro squadra) per ciascun
-  Pokemon in squadra. Il match migliore è evidenziato in grassetto.
+- **Nessun avversario**: placeholder "Combattimento non in corso".
+- **Avversario impostato, player attivo sconosciuto**: mostra intestazione
+  avversario + suggerimento di attivare il recognize per identificare il
+  Pokemon del giocatore in campo.
+- **Avversario + player attivo entrambi impostati**: mostra una riga
+  singola con nome/tipi del player in campo e i moltiplicatori difesa
+  (max STAB nemico in ingresso) e offesa (max STAB proprio in uscita).
 
-La logica dei moltiplicatori vive in `pokemon_helper.engine.matchup`; qui
-resta solo la formattazione e il rendering.
+I dati coprono solo i due Pokemon **effettivamente in scontro** (avversario
++ player attivo). La logica dei moltiplicatori vive in
+`pokemon_helper.engine.matchup`; qui resta solo formattazione e rendering.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from pokemon_helper.data import PokemonRepository
-from pokemon_helper.engine import EffectivenessEngine, best_matchup_index, compute_matchup
+from pokemon_helper.engine import EffectivenessEngine, compute_matchup
 from pokemon_helper.ui.state import AppState
 from pokemon_helper.ui.types_meta import color_for, label_it
 
@@ -87,6 +88,7 @@ class OpponentPanel(QWidget):
         self._repo = repository
         self._state = state
         self._opponent_id: int | None = None
+        self._active_player_id: int | None = None
         self._content: QWidget | None = None
 
         # Layout esterno: il contenuto interno è rigenerato ad ogni refresh().
@@ -99,10 +101,22 @@ class OpponentPanel(QWidget):
     # -------------------------------------------------------- public API
 
     def set_opponent(self, pokemon_id: int | None) -> None:
-        """Imposta l'avversario corrente. In F2 nessuno lo chiama (rimane None)."""
+        """Imposta l'avversario corrente."""
         if self._opponent_id == pokemon_id:
             return
         self._opponent_id = pokemon_id
+        self._refresh()
+
+    def set_active_player(self, pokemon_id: int | None) -> None:
+        """Imposta il Pokemon del giocatore attualmente in campo.
+
+        Il matchup viene sempre calcolato per la coppia
+        (avversario, player attivo). Se uno dei due manca, il pannello
+        mostra un placeholder informativo invece della tabella.
+        """
+        if self._active_player_id == pokemon_id:
+            return
+        self._active_player_id = pokemon_id
         self._refresh()
 
     def apply_state(self, state: AppState) -> None:
@@ -142,10 +156,11 @@ class OpponentPanel(QWidget):
         return widget
 
     def _build_battle(self) -> QWidget | None:
-        """Riquadro con avversario + tabella difesa/offesa per la squadra.
+        """Riquadro con lo scontro corrente: solo player attivo vs avversario.
 
         Ritorna `None` se i dati per costruirlo sono incompleti (avversario
-        sconosciuto, senza tipi in questa generazione).
+        sconosciuto o senza tipi nella generazione). Se manca il player attivo
+        mostra un messaggio informativo al posto della tabella.
         """
         if self._opponent_id is None:
             return None
@@ -163,7 +178,7 @@ class OpponentPanel(QWidget):
 
         layout.addWidget(_separator(widget))
         layout.addLayout(self._build_opponent_header(widget, opponent, opp_types))
-        layout.addLayout(self._build_matchup_grid(widget, opp_types))
+        layout.addWidget(self._build_matchup_row(widget, opp_types))
         return widget
 
     def _build_opponent_header(self, parent: QWidget, opponent, opp_types) -> QHBoxLayout:
@@ -178,66 +193,72 @@ class OpponentPanel(QWidget):
         header.addWidget(types_label)
         return header
 
-    def _build_matchup_grid(self, parent: QWidget, opp_types: tuple[str, ...]) -> QGridLayout:
+    def _build_matchup_row(self, parent: QWidget, opp_types: tuple[str, ...]) -> QWidget:
+        """Riga singola con difesa/offesa del player attivo vs avversario.
+
+        Se il player attivo non è impostato (nessun recognize battaglia
+        eseguito), mostra un messaggio informativo invece della riga.
+        """
+        container = QWidget(parent)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 4, 0, 0)
+        container_layout.setSpacing(2)
+
+        if self._active_player_id is None:
+            hint = QLabel(
+                "Player in campo sconosciuto — usa Ctrl+Alt+R o ⚔ Avversario "
+                "in combattimento per rilevarlo",
+                container,
+            )
+            hint.setWordWrap(True)
+            hint.setStyleSheet("color: #7a7a8a; font-style: italic; padding: 4px;")
+            container_layout.addWidget(hint)
+            return container
+
+        player_pokemon = self._repo.get_by_id(self._active_player_id)
+        if player_pokemon is None:
+            hint = QLabel(f"Player id={self._active_player_id} non nel dataset", container)
+            hint.setStyleSheet("color: #7a7a8a; font-style: italic; padding: 4px;")
+            container_layout.addWidget(hint)
+            return container
+
+        player_types = self._repo.get_types(player_pokemon.id, self._state.generation)
+        if not player_types:
+            hint = QLabel(
+                f"{player_pokemon.name_it or player_pokemon.name_en}: nessun tipo "
+                f"per Gen {self._state.generation}",
+                container,
+            )
+            hint.setStyleSheet("color: #7a7a8a; font-style: italic; padding: 4px;")
+            container_layout.addWidget(hint)
+            return container
+
         engine = EffectivenessEngine(self._state.generation)
+        defense, offense = compute_matchup(engine, opp_types, player_types)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(2)
 
         header_style = "color: #aaaabb; font-size: 10px;"
-        for col, text in enumerate(("Squadra", "Dif.", "Off.")):
-            lbl = QLabel(text, parent)
+        for col, text in enumerate(("In campo", "Dif.", "Off.")):
+            lbl = QLabel(text, container)
             lbl.setStyleSheet(header_style)
             grid.addWidget(lbl, 0, col)
 
-        rows = self._compute_rows(engine, opp_types)
-        best = best_matchup_index([(defense, offense) for _, defense, offense in rows])
+        name = player_pokemon.name_it or player_pokemon.name_en
+        name_lbl = QLabel(name, container)
+        name_lbl.setTextFormat(Qt.TextFormat.RichText)
+        name_lbl.setText(f"<b>{name}</b> {_render_type_badges(player_types)}")
+        def_lbl = _multiplier_badge(defense, defense_color, container)
+        off_lbl = _multiplier_badge(offense, offense_color, container)
 
-        for row_index, (name, defense, offense) in enumerate(rows):
-            grid_row = row_index + 1
-            is_best = row_index == best
+        grid.addWidget(name_lbl, 1, 0)
+        grid.addWidget(def_lbl, 1, 1)
+        grid.addWidget(off_lbl, 1, 2)
 
-            name_lbl = QLabel(name, parent)
-            def_lbl = _multiplier_badge(defense, defense_color, parent)
-            off_lbl = _multiplier_badge(offense, offense_color, parent)
-
-            if is_best:
-                for lbl in (name_lbl, def_lbl, off_lbl):
-                    font = lbl.font()
-                    font.setBold(True)
-                    lbl.setFont(font)
-
-            grid.addWidget(name_lbl, grid_row, 0)
-            grid.addWidget(def_lbl, grid_row, 1)
-            grid.addWidget(off_lbl, grid_row, 2)
-
-        if not rows:
-            empty = QLabel("(squadra vuota)", parent)
-            empty.setStyleSheet("color: #7a7a8a; font-style: italic;")
-            grid.addWidget(empty, 1, 0, 1, 3)
-
-        return grid
-
-    def _compute_rows(
-        self,
-        engine: EffectivenessEngine,
-        opp_types: tuple[str, ...],
-    ) -> list[tuple[str, float, float]]:
-        """Per ogni slot squadra popolato ritorna `(nome, difesa, offesa)`."""
-        rows: list[tuple[str, float, float]] = []
-        for slot in self._state.team:
-            if slot is None:
-                continue
-            pokemon = self._repo.get_by_id(slot.pokemon_id)
-            if pokemon is None:
-                continue
-            team_types = self._repo.get_types(slot.pokemon_id, self._state.generation)
-            if not team_types:
-                continue
-            defense, offense = compute_matchup(engine, opp_types, team_types)
-            rows.append((pokemon.name_it or pokemon.name_en, defense, offense))
-        return rows
+        container_layout.addLayout(grid)
+        return container
 
 
 # ---------------------------------------------------------------------------
