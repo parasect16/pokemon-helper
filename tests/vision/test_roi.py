@@ -49,27 +49,26 @@ def test_roi_rejects_exceeding_native_bounds() -> None:
 def test_game_area_letterbox_height_limits() -> None:
     """Finestra molto larga → altezza limita, letterbox laterale centrato.
 
-    Aspect 3/2 (GBA). 1119×768 con menu 30 → area disp. 1119×738. Se riempio
-    altezza: 738 * 3/2 = 1107 pixel di larghezza → sta in 1119, letterbox
-    laterale (1119-1107)/2 = 6 px per lato.
+    Aspect 3/2 (GBA). 1119×768 con chrome 52 → area disp. 1119×716. Se riempio
+    altezza: 716 * 3/2 = 1074 pixel di larghezza → sta in 1119, letterbox
+    laterale (1119-1074)/2 = 22 px per lato.
     """
     area = compute_game_area(1119, 768, LAYOUT_MGBA_GBA)
-    assert area.w == 1107
-    assert area.h == 738
-    assert area.x == 6
-    assert area.y == 30
+    assert area.w == 1074
+    assert area.h == 716
+    assert area.x == 22
+    assert area.y == 52
 
 
 def test_game_area_letterbox_width_limits() -> None:
     """Finestra stretta e alta → larghezza limita, letterbox verticale."""
-    # 480 x 600, menu 30 → disp 480×570. width * 2/3 = 320 altezza → sta in 570.
-    # Ma se width limita: 480 * 2/3 = 320 di altezza. 570-320=250 di letterbox
-    # verticale (125 sopra, 125 sotto il menu).
+    # 480 x 600, chrome 52 → disp 480×548. width * 2/3 = 320 altezza → sta.
+    # 548-320=228 di letterbox verticale (114 sopra, 114 sotto il chrome).
     area = compute_game_area(480, 600, LAYOUT_MGBA_GBA)
     assert area.w == 480
     assert area.h == 320
     assert area.x == 0
-    assert area.y == 30 + (570 - 320) // 2
+    assert area.y == 52 + (548 - 320) // 2
 
 
 def test_game_area_menu_offset_hidden() -> None:

@@ -59,13 +59,18 @@ class GameLayout:
 
     # Rapporto larghezza/altezza dell'area gioco (GBA = 3/2, GB/GBC = 10/9).
     aspect_ratio: float
-    # Altezza in pixel del menu bar dell'emulatore (0 se nascosto).
-    menu_offset_top: int = 30
+    # Chrome totale in cima alla finestra: title bar Windows + menu bar mGBA.
+    # `windows-capture` in modalità default cattura l'INTERA finestra (non
+    # solo il client area) su Win10/11, quindi va sottratto il titolo (~30 px
+    # a DPI 100%, 37 a 125%) più il menu bar mGBA (~25 px). Misurato 52 px
+    # sulla macchina di sviluppo dell'utente (Win10 Pro 10.0.19045).
+    # TODO: auto-detect chrome via scansione riga teal iniziale sul frame.
+    menu_offset_top: int = 52
 
 
 # Layout comuni per uso F3.
-LAYOUT_MGBA_GBA = GameLayout(aspect_ratio=240 / 160, menu_offset_top=30)
-LAYOUT_MGBA_GB = GameLayout(aspect_ratio=160 / 144, menu_offset_top=30)
+LAYOUT_MGBA_GBA = GameLayout(aspect_ratio=240 / 160, menu_offset_top=52)
+LAYOUT_MGBA_GB = GameLayout(aspect_ratio=160 / 144, menu_offset_top=52)
 
 
 # ROI standard per gioco. Coordinate misurate manualmente in coordinate
