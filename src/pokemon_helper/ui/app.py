@@ -218,8 +218,10 @@ def _init_recognize_hotkey(
 
     bridge = _RecognizeBridge()
     bridge.opponent_recognized.connect(team_panel.set_opponent)
+    bridge.opponent_recognized.connect(lambda _pid: team_panel.flash_opponent_reload_success())
     bridge.player_recognized.connect(team_panel.set_active_player)
     bridge.team_updated.connect(team_panel.replace_team)
+    bridge.team_updated.connect(lambda _t: team_panel.flash_team_reload_success())
     bridge.failed.connect(lambda msg: print(f"[recognize] {msg}"))
 
     min_confidence = 0.6
