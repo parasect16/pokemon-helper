@@ -140,43 +140,35 @@ ROIS_FIRERED = GameRois(
     # Barra HP giocatore: barra colorata "PS ▬▬▬" (prima dei numeri assoluti).
     player_hp_bar=Roi(x=0.635, y=0.605, w=0.260, h=0.028),
     # --- Menu Pokemon ---
-    # Layout Rosso Fuoco: slot 1 grande a sinistra (Pokemon "attivo"), slot 2-6
+    # Layout Rosso Fuoco: slot 0 grande a sinistra (Pokemon "attivo"), slot 1-5
     # righe compatte a destra. Ciascun ROI comprende sia il nome sia la riga
     # del livello: `_pick_name_text` filtra la riga "L.XX" già oggi.
+    # Coord estratte via `scripts/extract_roi_from_annotated.py` da immagine
+    # annotata a mano dall'utente (magenta=nome, ciano=icona, giallo=livello).
     team_menu=TeamMenuRois(
         slot_areas=(
-            # Slot 1 (Pokemon attivo, box grande sinistra).
-            Roi(x=0.160, y=0.265, w=0.215, h=0.095),
-            # Slot 2 (prima riga compatta a destra: Gloom nel test).
-            Roi(x=0.473, y=0.122, w=0.199, h=0.095),
-            # Slot 3.
-            Roi(x=0.473, y=0.265, w=0.199, h=0.095),
-            # Slot 4.
-            Roi(x=0.473, y=0.414, w=0.199, h=0.095),
-            # Slot 5.
-            Roi(x=0.473, y=0.556, w=0.199, h=0.095),
-            # Slot 6 (ultima riga compatta).
-            Roi(x=0.473, y=0.706, w=0.199, h=0.095),
+            Roi(x=0.136, y=0.227, w=0.192, h=0.068),  # slot 0 (attivo, box sx)
+            Roi(x=0.492, y=0.091, w=0.216, h=0.050),  # slot 1 (col dx)
+            Roi(x=0.494, y=0.243, w=0.217, h=0.050),
+            Roi(x=0.497, y=0.391, w=0.215, h=0.050),
+            Roi(x=0.497, y=0.541, w=0.215, h=0.050),
+            Roi(x=0.493, y=0.690, w=0.216, h=0.050),  # slot 5
         ),
         slot_icons=(
-            # Icona slot 1 nel box attivo (in alto a sinistra del box).
-            Roi(x=0.040, y=0.271, w=0.077, h=0.115),
-            # Icone slot 2-6: colonna fissa a sinistra del nome.
-            Roi(x=0.406, y=0.109, w=0.068, h=0.088),
-            Roi(x=0.406, y=0.252, w=0.068, h=0.088),
-            Roi(x=0.406, y=0.394, w=0.068, h=0.088),
-            Roi(x=0.406, y=0.537, w=0.068, h=0.088),
-            Roi(x=0.406, y=0.680, w=0.068, h=0.088),
+            Roi(x=0.024, y=0.218, w=0.104, h=0.126),  # slot 0 (attivo)
+            Roi(x=0.362, y=0.066, w=0.122, h=0.134),  # slot 1
+            Roi(x=0.362, y=0.218, w=0.124, h=0.134),
+            Roi(x=0.364, y=0.371, w=0.125, h=0.134),
+            Roi(x=0.364, y=0.517, w=0.125, h=0.134),
+            Roi(x=0.361, y=0.669, w=0.125, h=0.134),  # slot 5
         ),
         slot_levels=(
-            # Slot 1 (box attivo): "L.25" sotto il nome dentro il box.
-            Roi(x=0.166, y=0.346, w=0.072, h=0.055),
-            # Slot 2-6: "L.XX" sotto il nome, colonna fissa a destra dell'icona.
-            Roi(x=0.510, y=0.204, w=0.090, h=0.055),
-            Roi(x=0.510, y=0.353, w=0.090, h=0.055),
-            Roi(x=0.510, y=0.502, w=0.090, h=0.055),
-            Roi(x=0.510, y=0.651, w=0.090, h=0.055),
-            Roi(x=0.510, y=0.801, w=0.090, h=0.055),
+            Roi(x=0.206, y=0.301, w=0.061, h=0.045),  # slot 0 (attivo)
+            Roi(x=0.571, y=0.149, w=0.061, h=0.053),  # slot 1
+            Roi(x=0.571, y=0.298, w=0.061, h=0.053),
+            Roi(x=0.571, y=0.446, w=0.061, h=0.053),
+            Roi(x=0.571, y=0.597, w=0.061, h=0.053),
+            Roi(x=0.572, y=0.748, w=0.061, h=0.053),  # slot 5
         ),
     ),
 )
