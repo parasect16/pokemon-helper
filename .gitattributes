@@ -1,0 +1,30 @@
+# Normalizza tutti i file testuali a LF nel repo (unix style), a prescindere
+# dal sistema operativo del clone. Elimina i warning "LF will be replaced by
+# CRLF" quando si committa da Windows.
+* text=auto eol=lf
+
+# Estensioni testuali esplicite (redundante con text=auto ma difensivo se
+# git-detect non riconosce il tipo).
+*.py       text eol=lf
+*.pyi      text eol=lf
+*.md       text eol=lf
+*.toml     text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.json     text eol=lf
+*.txt      text eol=lf
+*.cfg      text eol=lf
+*.ini      text eol=lf
+*.gitignore text eol=lf
+*.gitattributes text eol=lf
+
+# Binari: non toccare la codifica.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+*.sqlite   binary
+*.onnx     binary
+*.pkl      binary
+*.pyc      binary
