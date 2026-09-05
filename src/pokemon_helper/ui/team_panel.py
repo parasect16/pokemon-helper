@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.ui.add_pokemon_dialog import AddPokemonDialog
+from pokemon_helper.ui.opponent_panel import OpponentPanel
 from pokemon_helper.ui.state import (
     MAX_GENERATION,
     MIN_GENERATION,
@@ -57,6 +58,7 @@ class TeamPanel(QWidget):
         self._repository = repository
         self._state = state
         self._slots: list[TeamSlotWidget] = []
+        self._opponent_panel: OpponentPanel | None = None
 
         self._build_ui()
         self._refresh_slots()
@@ -97,6 +99,10 @@ class TeamPanel(QWidget):
             slot.removeRequested.connect(self._clear_slot)
             self._slots.append(slot)
             outer.addWidget(slot)
+
+        # Sezione avversario: placeholder finché F4 non imposta un ID.
+        self._opponent_panel = OpponentPanel(self._repository, self._state)
+        outer.addWidget(self._opponent_panel)
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -141,6 +147,13 @@ class TeamPanel(QWidget):
         for index, slot_widget in enumerate(self._slots):
             slot_widget.set_generation(self._state.generation)
             slot_widget.set_slot(self._state.team[index])
+        if self._opponent_panel is not None:
+            self._opponent_panel.apply_state(self._state)
+
+    def set_opponent(self, pokemon_id: int | None) -> None:
+        """API pubblica per impostare l'avversario (chiamata da F4 in futuro)."""
+        if self._opponent_panel is not None:
+            self._opponent_panel.set_opponent(pokemon_id)
 
     # ------------------------------------------------------------- handler
 
