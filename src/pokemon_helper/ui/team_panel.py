@@ -67,6 +67,10 @@ class TeamPanel(QWidget):
 
     def _build_ui(self) -> None:
         self.setObjectName("teamPanel")
+        # `WA_StyledBackground` è necessario affinché una QWidget "normale"
+        # dipinga effettivamente il background-color dichiarato in QSS
+        # (altrimenti Qt mostra la palette di sistema, chiara).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # Sfondo scuro opaco per il pannello. La finestra ospitante fornisce
         # bordi e chrome nativi Windows.
         self.setStyleSheet(
