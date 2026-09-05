@@ -50,6 +50,9 @@ data/vendor/
 data/*.sqlite
 data/*.sqlite-journal
 data/raw/
+# Debug artefatti degli script diagnostici (data/roi-*.png, data/icon-*.png,
+# data/team-menu-*.png, data/capture-*.png, data/recognize-*.png).
+data/*.png
 
 # Logs
 *.log

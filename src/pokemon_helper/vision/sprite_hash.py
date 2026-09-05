@@ -28,6 +28,41 @@ def compute_phash(image: Image.Image) -> str:
     return str(imagehash.phash(normalized))
 
 
+def compute_icon_phash(image: Image.Image) -> str:
+    """Hash a 64 bit pensato per le mini icone del menu Pokemon.
+
+    Sceglie `dhash` invece di `phash`: la difference-hash misura variazioni
+    fra pixel adiacenti (edge structure) invece della componente DCT globale,
+    e per icone piccole con leggere variazioni di background/animazione dà
+    match più affidabili nei nostri test.
+
+    Pipeline:
+    1. Componi eventuale alpha su sfondo bianco.
+    2. Pad-to-square (bordo bianco) per rispettare l'aspect ratio.
+    3. Resize a 32×32 con LANCZOS.
+    4. `dhash` (implementato da imagehash) su questa base.
+
+    Le icone di riferimento (~32×32 quadrate) e i crop catturati dal menu
+    (~75×88 in FireRed) vengono così normalizzati alla stessa forma prima
+    del hashing.
+    """
+    normalized = _flatten_alpha(image)
+    square = _pad_to_square(normalized, background=(255, 255, 255))
+    resized = square.resize((32, 32), Image.Resampling.LANCZOS)
+    return str(imagehash.dhash(resized))
+
+
+def _pad_to_square(image: Image.Image, background: tuple[int, int, int]) -> Image.Image:
+    """Ritorna l'immagine paddata a quadrato con il colore di sfondo dato."""
+    width, height = image.size
+    if width == height:
+        return image
+    side = max(width, height)
+    canvas = Image.new("RGB", (side, side), background)
+    canvas.paste(image, ((side - width) // 2, (side - height) // 2))
+    return canvas
+
+
 def _flatten_alpha(image: Image.Image) -> Image.Image:
     """Compone `image` su un fondo bianco se ha alpha; restituisce RGB."""
     if image.mode == "RGB":

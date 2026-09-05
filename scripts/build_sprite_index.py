@@ -38,6 +38,7 @@ import imagehash
 from PIL import Image, UnidentifiedImageError
 
 from pokemon_helper.data import init_schema
+from pokemon_helper.vision.sprite_hash import compute_icon_phash
 
 # ---------------------------------------------------------------------------
 # Paths e mappe
@@ -171,6 +172,8 @@ def _iter_sprite_rows(
 
     - Front sprites: PNG diretti nella dir del gioco (`{id}.png`).
     - Back sprites: PNG dentro `back/` (`back/{id}.png`).
+    - Icon sprites: PNG in `generation-{roman}/icons/` (mini icone menu
+      Pokemon; salvate come `side='icon'` con `game='menu'` per distinguerle).
     - Skip file con id fuori range noto (forme alternative, id > 9999, ecc.).
     - Skip file non decodificabili come immagine.
     """
@@ -199,6 +202,27 @@ def _iter_sprite_rows(
                     relative = png_path.relative_to(SPRITES_VENDOR_DIR).as_posix()
                     yield (pokemon_id, generation, game, side, phash, relative)
 
+        # Icone menu: `generation-{roman}/icons/{id}.png`. Non è vincolato a
+        # un gioco specifico, usiamo `game='menu'` come marker. Il pHash è
+        # calcolato con `compute_icon_phash` (pad-to-square + resize a 64x64):
+        # deve corrispondere alla stessa normalizzazione applicata alle icone
+        # catturate in `Recognizer.recognize_team`.
+        icons_dir = gen_dir / "icons"
+        if not icons_dir.is_dir():
+            continue
+        for png_path in _iter_png_children(icons_dir):
+            try:
+                pokemon_id = int(png_path.stem)
+            except ValueError:
+                continue
+            if pokemon_id not in known_species:
+                continue
+            phash = _compute_icon_phash_from_path(png_path)
+            if phash is None:
+                continue
+            relative = png_path.relative_to(SPRITES_VENDOR_DIR).as_posix()
+            yield (pokemon_id, generation, "menu", "icon", phash, relative)
+
 
 def _iter_png_children(directory: Path) -> Iterable[Path]:
     """Elenca solo i PNG figli diretti (non ricorsivo)."""
@@ -217,6 +241,17 @@ def _compute_phash(path: Path) -> str | None:
         with Image.open(path) as image:
             image.load()
             return str(imagehash.phash(image))
+    except (OSError, UnidentifiedImageError) as exc:
+        print(f"[warn] impossibile decodificare {path.name}: {exc}")
+        return None
+
+
+def _compute_icon_phash_from_path(path: Path) -> str | None:
+    """Variante di `_compute_phash` che applica `compute_icon_phash`."""
+    try:
+        with Image.open(path) as image:
+            image.load()
+            return compute_icon_phash(image)
     except (OSError, UnidentifiedImageError) as exc:
         print(f"[warn] impossibile decodificare {path.name}: {exc}")
         return None

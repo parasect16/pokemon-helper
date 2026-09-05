@@ -25,7 +25,7 @@ from PIL import Image
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.vision.ocr import OcrEngine, OcrResult
 from pokemon_helper.vision.roi import GameLayout, GameRois, compute_game_area, roi_to_pixels
-from pokemon_helper.vision.sprite_hash import compute_phash
+from pokemon_helper.vision.sprite_hash import compute_icon_phash, compute_phash
 
 # Pattern per riconoscere l'indicatore di livello: es. "L.33", "L 33", "Lv.33".
 _LEVEL_PATTERN = re.compile(r"^l\.?v?\.?\s*\d+$", re.IGNORECASE)
@@ -49,8 +49,11 @@ class Recognition:
 class TeamRecognition:
     """Esito del riconoscimento di uno slot della squadra dal menu Pokemon.
 
-    `pokemon_id=None` significa "nessun match affidabile" (nickname sconosciuto,
-    OCR fallito, slot vuoto). `level=None` significa livello non decifrato.
+    `pokemon_id=None` significa "nessun match affidabile" (nickname
+    sconosciuto e icona non riconosciuta, oppure slot vuoto).
+    `level=None` significa livello non decifrato.
+    `source`: "name" (OCR nome ha matchato), "icon" (fallback icona pHash),
+    o "none" (nessun match).
     """
 
     slot_index: int  # 0..5, ordine visivo dello schermo (0 = attivo)
@@ -58,6 +61,7 @@ class TeamRecognition:
     level: int | None
     confidence: float
     ocr_text: str
+    source: str = "none"
 
 
 class Recognizer:
@@ -115,21 +119,24 @@ class Recognizer:
         generation: int,
         *,
         min_similarity: float = 0.55,
+        icon_max_distance: int = 18,
     ) -> list[TeamRecognition]:
         """Riconosce i 6 slot della squadra dalla schermata elenco Pokemon.
 
-        Per ciascuno slot esegue OCR sul riquadro (nome + livello), separa
-        le due righe con `_pick_name_text` e `_extract_level`, poi fa fuzzy
-        match sul nome. Ritorna sempre 6 elementi in ordine visivo dello
-        schermo (slot 1 = Pokemon attivo, poi 2..6). Un elemento con
-        `pokemon_id is None` indica match assente (nickname sconosciuto,
-        OCR fallito, slot vuoto).
+        Per ciascun slot:
+        1. OCR sul riquadro nome + livello, `_pick_name_text` sceglie il testo
+           e `_extract_level` prende il numero.
+        2. Fuzzy match sul nome via repository.
+        3. Se il fuzzy non trova nulla (probabile nickname), fallback su pHash
+           dell'icona menu contro il subset `side='icon'` di `sprite_hashes`.
 
-        pHash non è utilizzato qui: le icone del menu non sono indicizzate
-        (il DB contiene solo sprite front/back dei giochi, non le mini-icone).
+        Ritorna sempre 6 elementi in ordine visivo (slot 1 = Pokemon attivo).
+        Un elemento con `pokemon_id is None` indica match assente da entrambi
+        i canali (nickname + icona non riconosciuta o slot vuoto).
         """
         game_area = compute_game_area(frame.width, frame.height, layout)
         results: list[TeamRecognition] = []
+        slot_icons = rois.team_menu.slot_icons
         for index, slot_roi in enumerate(rois.team_menu.slot_areas):
             crop = frame.crop(roi_to_pixels(slot_roi, game_area).as_crop_box())
             ocr_lines = self._ocr.recognize(crop)
@@ -138,6 +145,7 @@ class Recognizer:
 
             pokemon_id: int | None = None
             confidence = 0.0
+            source = "none"
             if name_text:
                 candidates = self._repo.find_by_fuzzy_name(
                     name_text, generation, min_similarity=min_similarity, limit=1
@@ -146,6 +154,27 @@ class Recognizer:
                     pokemon, score = candidates[0]
                     pokemon_id = pokemon.id
                     confidence = score
+                    source = "name"
+
+            # Fallback icona se il nome non ha prodotto nulla di affidabile.
+            if pokemon_id is None:
+                icon_crop = frame.crop(roi_to_pixels(slot_icons[index], game_area).as_crop_box())
+                icon_phash = compute_icon_phash(icon_crop)
+                icon_matches = self._repo.find_pokemon_by_sprite_hash(
+                    icon_phash,
+                    generation,
+                    sides=("icon",),
+                    max_distance=icon_max_distance,
+                    limit=1,
+                )
+                if icon_matches:
+                    best = icon_matches[0]
+                    pokemon_id = best.pokemon_id
+                    # Confidenza inversamente proporzionale alla distanza:
+                    # 0 → 1.0, `icon_max_distance` → 0.5. Sopra soglia il match
+                    # è già stato scartato da `find_pokemon_by_sprite_hash`.
+                    confidence = max(0.5, 1.0 - best.distance / (icon_max_distance * 2))
+                    source = "icon"
 
             results.append(
                 TeamRecognition(
@@ -154,6 +183,7 @@ class Recognizer:
                     level=level,
                     confidence=confidence,
                     ocr_text=name_text or "",
+                    source=source,
                 )
             )
         return results

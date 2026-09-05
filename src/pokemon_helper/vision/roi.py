@@ -82,17 +82,24 @@ TEAM_SIZE = 6
 class TeamMenuRois:
     """ROI degli slot squadra nella schermata elenco Pokemon.
 
-    `slot_areas`: 6 rettangoli che coprono nome + livello di ciascuno slot.
-    L'OCR sul crop restituisce due righe (nome, livello) che vengono
-    disambiguate dal recognizer.
+    - `slot_areas`: 6 rettangoli che coprono nome + livello di ciascun slot.
+      OCR sul crop → due righe (nome, livello), disambiguate dal recognizer.
+    - `slot_icons`: 6 rettangoli sulle mini icone del menu (una per slot).
+      Usati come **fallback** dal recognizer quando l'OCR nome non trova un
+      match affidabile (es. Pokemon con nickname personalizzato).
     """
 
     slot_areas: tuple[Roi, ...]
+    slot_icons: tuple[Roi, ...]
 
     def __post_init__(self) -> None:
         if len(self.slot_areas) != TEAM_SIZE:
             raise ValueError(
                 f"team menu must define {TEAM_SIZE} slot areas, got {len(self.slot_areas)}"
+            )
+        if len(self.slot_icons) != TEAM_SIZE:
+            raise ValueError(
+                f"team menu must define {TEAM_SIZE} slot icons, got {len(self.slot_icons)}"
             )
 
 
@@ -146,6 +153,16 @@ ROIS_FIRERED = GameRois(
             Roi(x=0.473, y=0.556, w=0.199, h=0.095),
             # Slot 6 (ultima riga compatta).
             Roi(x=0.473, y=0.706, w=0.199, h=0.095),
+        ),
+        slot_icons=(
+            # Icona slot 1 nel box attivo (in alto a sinistra del box).
+            Roi(x=0.040, y=0.271, w=0.077, h=0.115),
+            # Icone slot 2-6: colonna fissa a sinistra del nome.
+            Roi(x=0.406, y=0.109, w=0.068, h=0.088),
+            Roi(x=0.406, y=0.252, w=0.068, h=0.088),
+            Roi(x=0.406, y=0.394, w=0.068, h=0.088),
+            Roi(x=0.406, y=0.537, w=0.068, h=0.088),
+            Roi(x=0.406, y=0.680, w=0.068, h=0.088),
         ),
     ),
 )

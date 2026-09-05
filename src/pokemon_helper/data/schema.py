@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS sprite_hashes (
     pokemon_id INTEGER NOT NULL,
     generation INTEGER NOT NULL CHECK (generation BETWEEN 1 AND 5),
     game TEXT NOT NULL,
-    side TEXT NOT NULL CHECK (side IN ('front', 'back')),
+    -- 'front'/'back' = sprite completo in battaglia; 'icon' = mini sprite
+    -- del menu Pokemon (32x32 tipico) usato per il match della squadra.
+    side TEXT NOT NULL CHECK (side IN ('front', 'back', 'icon')),
     phash TEXT NOT NULL,
     source_path TEXT NOT NULL,
     PRIMARY KEY (pokemon_id, generation, game, side),

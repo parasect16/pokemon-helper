@@ -157,19 +157,21 @@ class PokemonRepository:
         query_phash: str,
         generation: int,
         *,
+        sides: tuple[str, ...] | None = None,
         max_distance: int = 12,
         limit: int = 5,
     ) -> list[SpriteMatch]:
         """Cerca lo sprite indicizzato più simile al pHash fornito.
 
-        La ricerca è ristretta agli sprite della generazione indicata. Per ogni
-        sprite calcola la distanza di Hamming rispetto a `query_phash`; scarta
-        i risultati oltre `max_distance` e restituisce fino a `limit` Pokemon
-        distinti ordinati per distanza crescente (best-per-Pokemon).
+        La ricerca è ristretta agli sprite della generazione indicata e (se
+        `sides` è passato) ai lati richiesti — `('icon',)` per il match sulle
+        mini icone del menu Pokemon, `('front', 'back')` per gli sprite di
+        combattimento. `None` significa "tutti i lati".
 
-        Con ~2000 sprite per generazione la scansione lineare in Python
-        richiede ordini di grandezza sub-ms: nessuna struttura ausiliaria
-        (es. BK-tree) è giustificata a questo scale.
+        Per ogni sprite calcola la distanza di Hamming rispetto a
+        `query_phash`; scarta i risultati oltre `max_distance` e restituisce
+        fino a `limit` Pokemon distinti ordinati per distanza crescente
+        (best-per-Pokemon).
         """
         if not 1 <= generation <= 5:
             raise ValueError(f"unsupported generation: {generation}")
@@ -177,11 +179,16 @@ class PokemonRepository:
             raise ValueError(f"query_phash must be 16 hex characters, got {len(query_phash)}")
         query_int = int(query_phash, 16)
 
-        rows = self._conn.execute(
+        query = (
             "SELECT pokemon_id, generation, game, side, phash "
-            "FROM sprite_hashes WHERE generation = ?",
-            (generation,),
-        ).fetchall()
+            "FROM sprite_hashes WHERE generation = ?"
+        )
+        params: list = [generation]
+        if sides:
+            placeholders = ",".join("?" for _ in sides)
+            query += f" AND side IN ({placeholders})"
+            params.extend(sides)
+        rows = self._conn.execute(query, params).fetchall()
 
         # Migliore corrispondenza per pokemon (dedupe multi-game/side).
         best_by_pokemon: dict[int, SpriteMatch] = {}

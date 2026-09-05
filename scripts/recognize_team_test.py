@@ -54,7 +54,7 @@ def main() -> int:
                 name = pokemon.name_it if pokemon else f"#{res.pokemon_id}"
             print(
                 f"[slot {res.slot_index + 1}] name={name!r:20} level={res.level} "
-                f"conf={res.confidence:.2f} ocr={res.ocr_text!r}"
+                f"conf={res.confidence:.2f} src={res.source} ocr={res.ocr_text!r}"
             )
     return 0
 
