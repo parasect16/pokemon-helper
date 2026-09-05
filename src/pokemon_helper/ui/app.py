@@ -164,7 +164,11 @@ def _init_recognize_hotkey(
         return None
 
     capture = WindowCapture("mGBA")
-    ocr = OcrEngine()  # istanza singola condivisa: init pesante una volta sola.
+    # Istanza singola condivisa. Warm-up eseguito in background per evitare
+    # sia di stallare la GUI all'avvio sia il primo-click che paga i 150-500
+    # ms di init dei modelli ONNX.
+    ocr = OcrEngine()
+    threading.Thread(target=ocr.warm_up, daemon=True, name="ocr-warmup").start()
     db_path = default_db_path()
 
     bridge = _RecognizeBridge()
@@ -243,11 +247,21 @@ def _init_recognize_hotkey(
     # daemon per non bloccare il thread GUI durante la cattura + OCR (~200-400
     # ms). Il feedback torna in UI via i segnali del bridge, già usati dai
     # callback delle hotkey.
-    def spawn_in_thread(func):
-        return lambda: threading.Thread(target=func, daemon=True).start()
+    def spawn_in_thread(func, label: str):
+        def _runner() -> None:
+            try:
+                func()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[recognize-thread:{label}] eccezione: {exc}")
 
-    team_panel.reloadOpponentRequested.connect(spawn_in_thread(on_recognize))
-    team_panel.reloadTeamRequested.connect(spawn_in_thread(on_recognize_team))
+        def _dispatch() -> None:
+            print(f"[recognize-thread:{label}] avvio")
+            threading.Thread(target=_runner, daemon=True, name=label).start()
+
+        return _dispatch
+
+    team_panel.reloadOpponentRequested.connect(spawn_in_thread(on_recognize, "opp"))
+    team_panel.reloadTeamRequested.connect(spawn_in_thread(on_recognize_team, "team"))
 
     # Ritorniamo un aggregatore delle due hotkey per un unico `.stop()`.
     return _HotkeyGroup([hotkey, team_hotkey])

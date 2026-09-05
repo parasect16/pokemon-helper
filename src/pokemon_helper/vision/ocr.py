@@ -48,6 +48,14 @@ class OcrEngine:
             self._engine = RapidOCR()
         return self._engine
 
+    def warm_up(self) -> None:
+        """Forza l'inizializzazione (~150-500 ms) all'avvio dell'app.
+
+        Utile per evitare che la prima chiamata OCR (dal primo click di
+        `Ricarica`) paghi la latenza di caricamento dei modelli ONNX.
+        """
+        self._ensure_engine()
+
     def recognize(
         self,
         image: Image.Image,
