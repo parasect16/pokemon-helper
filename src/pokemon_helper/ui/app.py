@@ -16,8 +16,10 @@ verificare che la UI parta senza errori senza richiedere interazione.
 from __future__ import annotations
 
 import os
+import queue
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -53,6 +55,45 @@ class _RecognizeBridge(QObject):
     player_recognized = Signal(object)  # pokemon_id giocatore, o None
     team_updated = Signal(object)  # list[TeamSlot | None] con nuovo team
     failed = Signal(str)  # messaggio d'errore human-friendly
+
+
+class _RecognizeWorker:
+    """Worker thread persistente che processa job di riconoscimento serialmente.
+
+    Motivazioni:
+    - `windows-capture` (Windows Graphics Capture API) è sensibile all'apartment
+      COM del thread chiamante. Usare un thread long-lived con COM già
+      inizializzato evita stalli imprevedibili nei daemon thread "freschi".
+    - Serializzare le richieste (hotkey + pulsante) evita concorrenze sulla
+      stessa capture session e sull'inference ONNX di RapidOCR.
+    """
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue[Callable[[], None] | None] = queue.Queue()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="recognize-worker",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def submit(self, job: Callable[[], None]) -> None:
+        """Accoda un job. Ritorna subito; il worker lo esegue in FIFO."""
+        self._queue.put(job)
+
+    def stop(self) -> None:
+        """Segnala al worker di uscire; usato all'exit dell'app."""
+        self._queue.put(None)
+
+    def _run(self) -> None:
+        while True:
+            job = self._queue.get()
+            if job is None:
+                return
+            try:
+                job()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[recognize-worker] eccezione: {exc}")
 
 
 # Mappa generazione -> chiave di gioco supportata dai riconoscitori.
@@ -168,7 +209,11 @@ def _init_recognize_hotkey(
     # sia di stallare la GUI all'avvio sia il primo-click che paga i 150-500
     # ms di init dei modelli ONNX.
     ocr = OcrEngine()
-    threading.Thread(target=ocr.warm_up, daemon=True, name="ocr-warmup").start()
+    # Worker persistente: tutte le richieste (hotkey + pulsanti) vengono
+    # accodate qui. Il warm-up è il primo job — così il thread è già in vita
+    # quando arriva la prima richiesta di recognize.
+    worker = _RecognizeWorker()
+    worker.submit(ocr.warm_up)
     db_path = default_db_path()
 
     bridge = _RecognizeBridge()
@@ -238,33 +283,19 @@ def _init_recognize_hotkey(
         except Exception as exc:  # noqa: BLE001
             bridge.failed.emit(f"team recognize error: {exc}")
 
-    hotkey = GlobalHotkey("<ctrl>+<alt>+r", on_recognize)
+    # Sia hotkey sia pulsanti sottopongono al medesimo worker persistente.
+    # La hotkey (pynput thread) non chiama più `on_recognize` in-line: la
+    # accoda al worker per uniformare l'esecuzione ed evitare re-entrancy
+    # sulle risorse condivise di capture/OCR.
+    hotkey = GlobalHotkey("<ctrl>+<alt>+r", lambda: worker.submit(on_recognize))
     hotkey.start()
-    team_hotkey = GlobalHotkey("<ctrl>+<alt>+t", on_recognize_team)
+    team_hotkey = GlobalHotkey("<ctrl>+<alt>+t", lambda: worker.submit(on_recognize_team))
     team_hotkey.start()
 
-    # Pulsanti UI equivalenti alle hotkey. Lanciamo il recognize su un thread
-    # daemon per non bloccare il thread GUI durante la cattura + OCR (~200-400
-    # ms). Il feedback torna in UI via i segnali del bridge, già usati dai
-    # callback delle hotkey.
-    def spawn_in_thread(func, label: str):
-        def _runner() -> None:
-            try:
-                func()
-            except Exception as exc:  # noqa: BLE001
-                print(f"[recognize-thread:{label}] eccezione: {exc}")
+    team_panel.reloadOpponentRequested.connect(lambda: worker.submit(on_recognize))
+    team_panel.reloadTeamRequested.connect(lambda: worker.submit(on_recognize_team))
 
-        def _dispatch() -> None:
-            print(f"[recognize-thread:{label}] avvio")
-            threading.Thread(target=_runner, daemon=True, name=label).start()
-
-        return _dispatch
-
-    team_panel.reloadOpponentRequested.connect(spawn_in_thread(on_recognize, "opp"))
-    team_panel.reloadTeamRequested.connect(spawn_in_thread(on_recognize_team, "team"))
-
-    # Ritorniamo un aggregatore delle due hotkey per un unico `.stop()`.
-    return _HotkeyGroup([hotkey, team_hotkey])
+    return _HotkeyGroup([hotkey, team_hotkey, worker])
 
 
 class _HotkeyGroup:
