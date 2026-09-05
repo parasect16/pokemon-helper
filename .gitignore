@@ -56,3 +56,7 @@ data/*.png
 
 # Logs
 *.log
+
+# Backup automatici del compressore caveman (versione originale del file .md
+# viene salvata come <name>.original.md prima della compressione).
+*.original.md
