@@ -199,6 +199,7 @@ def _init_recognize_hotkey(
     recognize (overhead ~1 ms). Zero contesa con il thread GUI, zero rischio.
     """
     try:
+        from pokemon_helper.vision.battle_detector import is_battle_screen
         from pokemon_helper.vision.capture import CaptureError, WindowCapture
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
@@ -247,6 +248,16 @@ def _init_recognize_hotkey(
                 return
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
+
+            # Guard: se la barra HP avversario non ha pixel HP-colored, non
+            # siamo in battaglia — non aggiornare l'avversario per evitare
+            # falsi positivi (analog a `_team_snapshot_looks_like_menu`).
+            in_battle, reason = is_battle_screen(frame.image, layout, rois)
+            if not in_battle:
+                bridge.opponent_failed.emit(
+                    f"schermata combattimento non rilevata {reason} — avversario non aggiornato"
+                )
+                return
 
             # Riconosci entrambi i lati con una singola cattura, usando
             # una connection dedicata al thread pynput. Il player in campo
