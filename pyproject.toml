@@ -19,9 +19,12 @@ dev = [
     "ruff>=0.6",
     "pre-commit>=4.0",
 ]
-# Windows-only runtime deps added in later phases (F2+):
-#   PySide6, windows-capture, rapidocr-onnxruntime, imagehash, pillow
-app = []
+# Runtime deps for the interactive Windows app (F2+).
+# Vision/OCR/capture deps arrive in F3.
+app = [
+    "PySide6>=6.7",
+    "pynput>=1.7",
+]
 
 [project.scripts]
 pokemon-helper = "pokemon_helper.__main__:main"
