@@ -11,6 +11,7 @@ la costruzione del database è compito di `scripts/build_dataset.py`.
 from __future__ import annotations
 
 import sqlite3
+from difflib import SequenceMatcher
 from pathlib import Path
 
 from pokemon_helper.data.models import Pokemon, SpriteMatch
@@ -114,6 +115,42 @@ class PokemonRepository:
             (generation,),
         ).fetchall()
         return [_row_to_pokemon(row) for row in rows]
+
+    def find_by_fuzzy_name(
+        self,
+        query: str,
+        generation: int,
+        *,
+        min_similarity: float = 0.6,
+        limit: int = 5,
+    ) -> list[tuple[Pokemon, float]]:
+        """Cerca Pokemon per nome tollerante agli errori tipografici (OCR).
+
+        Score = max(similarity_it, similarity_en) via `difflib.SequenceMatcher`.
+        Filtra i Pokemon introdotti fino alla generazione data e restituisce
+        i top `limit` con score ≥ `min_similarity`, ordinati per score decrescente.
+
+        Progettato per raffinare l'output di RapidOCR (che tipicamente sbaglia
+        1-2 caratteri su nomi Pokemon con font pixel).
+        """
+        if not 1 <= generation <= 5:
+            raise ValueError(f"unsupported generation: {generation}")
+        needle = query.strip().lower()
+        if not needle:
+            return []
+
+        candidates = self.list_by_generation(generation)
+        scored: list[tuple[Pokemon, float]] = []
+        for pokemon in candidates:
+            names = [pokemon.name_en.lower()]
+            if pokemon.name_it:
+                names.append(pokemon.name_it.lower())
+            score = max(SequenceMatcher(None, needle, name).ratio() for name in names)
+            if score >= min_similarity:
+                scored.append((pokemon, score))
+
+        scored.sort(key=lambda item: (-item[1], item[0].id))
+        return scored[:limit]
 
     def find_pokemon_by_sprite_hash(
         self,
