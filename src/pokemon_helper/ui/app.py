@@ -137,7 +137,7 @@ def _restore_geometry(app: QApplication, window: CompanionWindow, state: AppStat
 def _init_recognize_hotkey(
     state: AppState,
     team_panel: TeamPanel,
-    repository: PokemonRepository,
+    repository: PokemonRepository,  # noqa: ARG001 — riservato per future estensioni
 ) -> GlobalHotkey | None:
     """Registra la hotkey `<ctrl>+<alt>+r` per il riconoscimento avversario.
 
@@ -145,6 +145,11 @@ def _init_recognize_hotkey(
     caso l'app funziona senza riconoscimento). Il callback della hotkey gira
     sul thread pynput: cattura il frame, esegue il recognizer e comunica il
     risultato al thread GUI via `_RecognizeBridge` (Signal cross-thread).
+
+    Nota threading: `sqlite3.Connection` di default rifiuta l'uso cross-thread
+    (`check_same_thread=True`). La `repository` principale è nata sul thread
+    GUI, quindi qui apriamo una connessione dedicata per ogni chiamata di
+    recognize (overhead ~1 ms). Zero contesa con il thread GUI, zero rischio.
     """
     try:
         from pokemon_helper.vision.capture import CaptureError, WindowCapture
@@ -156,7 +161,8 @@ def _init_recognize_hotkey(
         return None
 
     capture = WindowCapture("mGBA")
-    recognizer = Recognizer(repository, OcrEngine())
+    ocr = OcrEngine()  # istanza singola condivisa: init pesante una volta sola.
+    db_path = default_db_path()
 
     bridge = _RecognizeBridge()
     bridge.recognized.connect(team_panel.set_opponent)
@@ -172,7 +178,10 @@ def _init_recognize_hotkey(
                 return
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
-            result = recognizer.recognize_opponent(frame.image, layout, rois, state.generation)
+            # Connection dedicata al thread pynput.
+            with PokemonRepository.open(db_path) as thread_repo:
+                recognizer = Recognizer(thread_repo, ocr)
+                result = recognizer.recognize_opponent(frame.image, layout, rois, state.generation)
             if result is None or result.confidence < min_confidence:
                 bridge.failed.emit(
                     "nessun match affidabile"
