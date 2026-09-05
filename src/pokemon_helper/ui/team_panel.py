@@ -131,7 +131,11 @@ class TeamPanel(QWidget):
     _SUCCESS_STYLE = (
         "QPushButton { background-color: #2c5c2c; border: 1px solid #5cd05c; color: #d0ffd0; }"
     )
+    _WARNING_STYLE = (
+        "QPushButton { background-color: #6b5a1c; border: 1px solid #e0c060; color: #ffe9a8; }"
+    )
     _SUCCESS_HOLD_MS = 10_000
+    _WARNING_HOLD_MS = 10_000
 
     def _build_reload_buttons(self) -> QHBoxLayout:
         """Riga di pulsanti di ricarica (equivalenti alle hotkey `Ctrl+Alt+T/R`)."""
@@ -166,25 +170,74 @@ class TeamPanel(QWidget):
 
     def flash_team_reload_success(self) -> None:
         """Segnala successo sul pulsante squadra: check verde per 10 s."""
-        self._flash_success(self._reload_team_btn, self._RELOAD_TEAM_LABEL)
+        self._flash(
+            self._reload_team_btn,
+            self._RELOAD_TEAM_LABEL,
+            suffix="✓",
+            style=self._SUCCESS_STYLE,
+            tooltip=None,
+        )
 
     def flash_opponent_reload_success(self) -> None:
         """Segnala successo sul pulsante avversario: check verde per 10 s."""
-        self._flash_success(self._reload_opp_btn, self._RELOAD_OPP_LABEL)
+        self._flash(
+            self._reload_opp_btn,
+            self._RELOAD_OPP_LABEL,
+            suffix="✓",
+            style=self._SUCCESS_STYLE,
+            tooltip=None,
+        )
 
-    def _flash_success(self, button: QPushButton, base_label: str) -> None:
-        """Append `✓` + stile verde al pulsante, poi ripristina dopo 10 s."""
-        button.setText(f"{base_label} ✓")
-        button.setStyleSheet(self._SUCCESS_STYLE)
+    def flash_team_reload_warning(self, message: str = "") -> None:
+        """Segnala warning sul pulsante squadra: `⚠` giallo per 10 s.
+
+        Il `message` opzionale viene messo come tooltip così l'utente può
+        leggere il motivo (es. "schermata Pokemon non rilevata").
+        """
+        self._flash(
+            self._reload_team_btn,
+            self._RELOAD_TEAM_LABEL,
+            suffix="⚠",
+            style=self._WARNING_STYLE,
+            tooltip=message or None,
+        )
+
+    def flash_opponent_reload_warning(self, message: str = "") -> None:
+        """Segnala warning sul pulsante avversario: `⚠` giallo per 10 s."""
+        self._flash(
+            self._reload_opp_btn,
+            self._RELOAD_OPP_LABEL,
+            suffix="⚠",
+            style=self._WARNING_STYLE,
+            tooltip=message or None,
+        )
+
+    def _flash(
+        self,
+        button: QPushButton,
+        base_label: str,
+        *,
+        suffix: str,
+        style: str,
+        tooltip: str | None,
+    ) -> None:
+        """Applica suffisso + stile temporaneo al pulsante, ripristina dopo 10 s."""
+        original_tooltip = button.toolTip()
+        button.setText(f"{base_label} {suffix}")
+        button.setStyleSheet(style)
+        if tooltip is not None:
+            button.setToolTip(tooltip)
 
         def _reset() -> None:
-            # Non ripristinare se nel frattempo il pulsante ha già cambiato
-            # testo (nuova azione in corso): il timer precedente resta stale.
-            if button.text() == f"{base_label} ✓":
+            # No-op se nel frattempo un'altra azione ha cambiato lo stato:
+            # timer stale non deve sovrascrivere feedback più recente.
+            if button.text() == f"{base_label} {suffix}":
                 button.setText(base_label)
                 button.setStyleSheet("")
+                if tooltip is not None:
+                    button.setToolTip(original_tooltip)
 
-        QTimer.singleShot(self._SUCCESS_HOLD_MS, _reset)
+        QTimer.singleShot(self._WARNING_HOLD_MS, _reset)
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()

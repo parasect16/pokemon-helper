@@ -54,7 +54,9 @@ class _RecognizeBridge(QObject):
     opponent_recognized = Signal(int)  # pokemon_id avversario
     player_recognized = Signal(object)  # pokemon_id giocatore, o None
     team_updated = Signal(object)  # list[TeamSlot | None] con nuovo team
-    failed = Signal(str)  # messaggio d'errore human-friendly
+    # Failures separati per far apparire il warning sul pulsante giusto.
+    opponent_failed = Signal(str)  # messaggio d'errore riconoscimento avversario
+    team_failed = Signal(str)  # messaggio d'errore riconoscimento squadra
 
 
 class _RecognizeWorker:
@@ -222,7 +224,17 @@ def _init_recognize_hotkey(
     bridge.player_recognized.connect(team_panel.set_active_player)
     bridge.team_updated.connect(team_panel.replace_team)
     bridge.team_updated.connect(lambda _t: team_panel.flash_team_reload_success())
-    bridge.failed.connect(lambda msg: print(f"[recognize] {msg}"))
+
+    def _on_opp_fail(msg: str) -> None:
+        print(f"[recognize opp] {msg}")
+        team_panel.flash_opponent_reload_warning(msg)
+
+    def _on_team_fail(msg: str) -> None:
+        print(f"[recognize team] {msg}")
+        team_panel.flash_team_reload_warning(msg)
+
+    bridge.opponent_failed.connect(_on_opp_fail)
+    bridge.team_failed.connect(_on_team_fail)
 
     min_confidence = 0.6
 
@@ -230,7 +242,7 @@ def _init_recognize_hotkey(
         try:
             game_key = _GAME_BY_GENERATION.get(state.generation)
             if game_key is None:
-                bridge.failed.emit(f"nessun gioco supportato per Gen {state.generation}")
+                bridge.opponent_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
@@ -253,7 +265,7 @@ def _init_recognize_hotkey(
                 )
 
             if opp is None or opp.confidence < min_confidence:
-                bridge.failed.emit(
+                bridge.opponent_failed.emit(
                     "avversario non riconosciuto in modo affidabile"
                     if opp is None
                     else f"avversario: confidenza {opp.confidence:.2f} troppo bassa"
@@ -269,17 +281,17 @@ def _init_recognize_hotkey(
             else:
                 bridge.player_recognized.emit(None)
         except CaptureError as exc:
-            bridge.failed.emit(f"cattura fallita: {exc}")
+            bridge.opponent_failed.emit(f"cattura fallita: {exc}")
         except TimeoutError as exc:
-            bridge.failed.emit(str(exc))
+            bridge.opponent_failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001 — feedback console, non crash app
-            bridge.failed.emit(f"errore inatteso: {exc}")
+            bridge.opponent_failed.emit(f"errore inatteso: {exc}")
 
     def on_recognize_team() -> None:
         try:
             game_key = _GAME_BY_GENERATION.get(state.generation)
             if game_key is None:
-                bridge.failed.emit(f"nessun gioco supportato per Gen {state.generation}")
+                bridge.team_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
@@ -296,7 +308,7 @@ def _init_recognize_hotkey(
                 1 for r in results if r.ocr_text and len(r.ocr_text.strip()) >= 3
             )
             if meaningful_slots < 3:
-                bridge.failed.emit(
+                bridge.team_failed.emit(
                     "schermata Pokemon non rilevata "
                     f"({meaningful_slots}/6 slot leggibili) — squadra non aggiornata"
                 )
@@ -305,11 +317,11 @@ def _init_recognize_hotkey(
             new_team = _apply_team_recognition(results, state.team)
             bridge.team_updated.emit(new_team)
         except CaptureError as exc:
-            bridge.failed.emit(f"cattura fallita: {exc}")
+            bridge.team_failed.emit(f"cattura fallita: {exc}")
         except TimeoutError as exc:
-            bridge.failed.emit(str(exc))
+            bridge.team_failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
-            bridge.failed.emit(f"team recognize error: {exc}")
+            bridge.team_failed.emit(f"team recognize error: {exc}")
 
     # Sia hotkey sia pulsanti sottopongono al medesimo worker persistente.
     # La hotkey (pynput thread) non chiama più `on_recognize` in-line: la
