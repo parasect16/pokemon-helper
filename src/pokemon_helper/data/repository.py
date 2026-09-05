@@ -13,7 +13,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from pokemon_helper.data.models import Pokemon
+from pokemon_helper.data.models import Pokemon, SpriteMatch
 
 # Lingue accettate da `find_by_name`. Estendibile in futuro (es. "de", "fr").
 _SUPPORTED_LANGUAGES: frozenset[str] = frozenset({"it", "en"})
@@ -115,6 +115,61 @@ class PokemonRepository:
         ).fetchall()
         return [_row_to_pokemon(row) for row in rows]
 
+    def find_pokemon_by_sprite_hash(
+        self,
+        query_phash: str,
+        generation: int,
+        *,
+        max_distance: int = 12,
+        limit: int = 5,
+    ) -> list[SpriteMatch]:
+        """Cerca lo sprite indicizzato più simile al pHash fornito.
+
+        La ricerca è ristretta agli sprite della generazione indicata. Per ogni
+        sprite calcola la distanza di Hamming rispetto a `query_phash`; scarta
+        i risultati oltre `max_distance` e restituisce fino a `limit` Pokemon
+        distinti ordinati per distanza crescente (best-per-Pokemon).
+
+        Con ~2000 sprite per generazione la scansione lineare in Python
+        richiede ordini di grandezza sub-ms: nessuna struttura ausiliaria
+        (es. BK-tree) è giustificata a questo scale.
+        """
+        if not 1 <= generation <= 5:
+            raise ValueError(f"unsupported generation: {generation}")
+        if len(query_phash) != 16:
+            raise ValueError(f"query_phash must be 16 hex characters, got {len(query_phash)}")
+        query_int = int(query_phash, 16)
+
+        rows = self._conn.execute(
+            "SELECT pokemon_id, generation, game, side, phash "
+            "FROM sprite_hashes WHERE generation = ?",
+            (generation,),
+        ).fetchall()
+
+        # Migliore corrispondenza per pokemon (dedupe multi-game/side).
+        best_by_pokemon: dict[int, SpriteMatch] = {}
+        for row in rows:
+            distance = _hamming(query_int, int(row["phash"], 16))
+            if distance > max_distance:
+                continue
+            existing = best_by_pokemon.get(row["pokemon_id"])
+            if existing is not None and existing.distance <= distance:
+                continue
+            best_by_pokemon[row["pokemon_id"]] = SpriteMatch(
+                pokemon_id=row["pokemon_id"],
+                generation=row["generation"],
+                game=row["game"],
+                side=row["side"],
+                distance=distance,
+                phash=row["phash"],
+            )
+
+        ranked = sorted(
+            best_by_pokemon.values(),
+            key=lambda match: (match.distance, match.pokemon_id),
+        )
+        return ranked[:limit]
+
 
 def _row_to_pokemon(row: sqlite3.Row) -> Pokemon:
     """Converte una `sqlite3.Row` in un `Pokemon` di dominio."""
@@ -125,3 +180,8 @@ def _row_to_pokemon(row: sqlite3.Row) -> Pokemon:
         name_it=row["name_it"],
         generation_introduced=row["generation_introduced"],
     )
+
+
+def _hamming(a: int, b: int) -> int:
+    """Distanza di Hamming fra due interi (numero di bit differenti)."""
+    return (a ^ b).bit_count()

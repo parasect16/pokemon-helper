@@ -38,6 +38,24 @@ CREATE TABLE IF NOT EXISTS pokemon_types_by_gen (
     PRIMARY KEY (pokemon_id, generation, slot),
     FOREIGN KEY (pokemon_id) REFERENCES pokemon(id)
 );
+
+-- pHash degli sprite dei Pokemon per (generazione, gioco, lato).
+-- Il pHash è memorizzato come stringa esadecimale di 16 caratteri
+-- (64 bit dell'algoritmo pHash di imagehash). L'unicità è garantita a
+-- livello di combinazione (specie, gen, gioco, lato). Le corrispondenze
+-- a runtime avvengono via Hamming distance, calcolata lato Python.
+CREATE TABLE IF NOT EXISTS sprite_hashes (
+    pokemon_id INTEGER NOT NULL,
+    generation INTEGER NOT NULL CHECK (generation BETWEEN 1 AND 5),
+    game TEXT NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('front', 'back')),
+    phash TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    PRIMARY KEY (pokemon_id, generation, game, side),
+    FOREIGN KEY (pokemon_id) REFERENCES pokemon(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sprite_hashes_gen ON sprite_hashes(generation);
 """
 
 

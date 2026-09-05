@@ -25,3 +25,28 @@ class Pokemon:
     name_en: str
     name_it: str | None
     generation_introduced: int
+
+
+@dataclass(frozen=True, slots=True)
+class SpriteMatch:
+    """Corrispondenza fra uno sprite catturato e un Pokemon indicizzato.
+
+    Prodotto da `PokemonRepository.find_pokemon_by_sprite_hash`.
+    L'istanza contiene il pokemon più prossimo per un singolo (game, side)
+    con la sua distanza di Hamming rispetto al pHash query.
+
+    Attributi:
+        pokemon_id: id della specie associata allo sprite indicizzato.
+        generation: generazione del gioco a cui appartiene lo sprite.
+        game: identificativo del gioco (es. "red-blue", "black-white").
+        side: "front" o "back".
+        distance: distanza di Hamming (0-64) fra query e hash indicizzato.
+        phash: hash indicizzato in forma esadecimale (16 caratteri).
+    """
+
+    pokemon_id: int
+    generation: int
+    game: str
+    side: str
+    distance: int
+    phash: str
