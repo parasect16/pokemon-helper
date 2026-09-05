@@ -19,6 +19,7 @@ import os
 import queue
 import sys
 import threading
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -299,18 +300,10 @@ def _init_recognize_hotkey(
                 recognizer = Recognizer(thread_repo, ocr)
                 results = recognizer.recognize_team(frame.image, layout, rois, state.generation)
 
-            # Heuristica anti-sovrascrittura: se non siamo nella schermata
-            # elenco Pokemon, gli slot ROI puntano a pixel di sfondo casuali
-            # e l'OCR restituisce testo vuoto/spurio per la maggior parte
-            # dei 6 slot. Richiediamo almeno 3 slot con testo di lunghezza
-            # >= 3 caratteri, altrimenti manteniamo la squadra corrente.
-            meaningful_slots = sum(
-                1 for r in results if r.ocr_text and len(r.ocr_text.strip()) >= 3
-            )
-            if meaningful_slots < 3:
+            looks_menu, reason = _team_snapshot_looks_like_menu(results)
+            if not looks_menu:
                 bridge.team_failed.emit(
-                    "schermata Pokemon non rilevata "
-                    f"({meaningful_slots}/6 slot leggibili) — squadra non aggiornata"
+                    f"schermata Pokemon non rilevata {reason} — squadra non aggiornata"
                 )
                 return
 
@@ -350,6 +343,33 @@ class _HotkeyGroup:
                 hk.stop()
             except Exception as exc:  # noqa: BLE001
                 print(f"[hotkey] errore stop: {exc}")
+
+
+def _team_snapshot_looks_like_menu(results) -> tuple[bool, str]:
+    """Ritorna `(True, "")` se `results` sembra la schermata menu Pokemon.
+
+    Due heuristiche complementari:
+
+    1. **Testo leggibile**: su una schermata non-menu, la maggior parte dei
+       6 ROI slot cade su sfondo casuale e l'OCR ritorna vuoto/spurio.
+       Richiediamo almeno 3 slot con testo di ≥3 caratteri.
+    2. **Distintività**: sulla schermata combattimento più ROI slot possono
+       cadere sul medesimo elemento UI (es. nome dell'avversario ripetuto
+       sui pixel di background) e risolvere allo stesso `pokemon_id`. Sul
+       menu Pokemon reale i 6 slot sono per definizione distinti o vuoti,
+       quindi due o più match sullo stesso id = non menu.
+
+    In caso di fallimento ritorna il motivo tra parentesi, usato in tooltip.
+    """
+    meaningful = sum(1 for r in results if r.ocr_text and len(r.ocr_text.strip()) >= 3)
+    if meaningful < 3:
+        return False, f"({meaningful}/6 slot leggibili)"
+    matched_ids = [r.pokemon_id for r in results if r.pokemon_id is not None]
+    if matched_ids:
+        top_id, top_count = Counter(matched_ids).most_common(1)[0]
+        if top_count > 1:
+            return False, f"(id {top_id} in {top_count} slot)"
+    return True, ""
 
 
 def _apply_team_recognition(results, current_team) -> list:

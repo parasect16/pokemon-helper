@@ -64,6 +64,19 @@ Convenzioni:
 - `[ ]` **Packaging Windows**: PyInstaller o `python -m
   build` + installer. Ora serve `pip install -e ".[dev,app,vision]"` in venv.
 
+## Prossimo debug ROI (pianificato)
+
+- `[ ]` **Verifica ROI battaglia + team menu su risoluzione emulatore
+  odierna**. Utente disegnerà a colori 3 aree per capture di riferimento
+  (nome/pokemon/livello), poi confronto con `ROIS_FIRERED`. Serve:
+  - definire 3 colori distinti + visibili (proposta: `#FF00FF` magenta
+    per nome, `#00FFFF` ciano per sprite/icona, `#FFFF00` giallo per
+    livello);
+  - script snap che accetta un PNG annotato dall'utente ed estrae
+    bounding box per colore → normalizza in coord `Roi` (0..1 su game
+    area);
+  - confronto ROI dedotta vs corrente, produce diff patch per `roi.py`.
+
 ## Bug noti minori
 
 - `[ ]` `data/*.png` gitignored ma alcuni script scrivono altri file
