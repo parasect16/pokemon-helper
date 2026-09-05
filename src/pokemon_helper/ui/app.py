@@ -40,6 +40,25 @@ class _HotkeyBridge(QObject):
     toggled = Signal()
 
 
+class _RecognizeBridge(QObject):
+    """Ponte thread-safe per il riconoscimento asincrono dell'avversario.
+
+    L'esito del riconoscimento (successo o fallimento) viene emesso come
+    Signal, così l'update della UI avviene nel thread GUI di Qt anche se
+    la chiamata originaria arriva dal thread listener di pynput.
+    """
+
+    recognized = Signal(int)  # pokemon_id
+    failed = Signal(str)  # messaggio d'errore human-friendly
+
+
+# Mappa generazione -> chiave di gioco supportata dai riconoscitori.
+# Per ora solo Rosso Fuoco (Gen 3, GBA). Estendibile in futuro.
+_GAME_BY_GENERATION: dict[int, str] = {
+    3: "firered",
+}
+
+
 def default_db_path() -> Path:
     """Path atteso del database SQLite: `<cwd>/data/pokemon.sqlite`."""
     return Path.cwd() / "data" / "pokemon.sqlite"
@@ -78,6 +97,10 @@ def run() -> int:
     hotkey = GlobalHotkey(DEFAULT_TOGGLE_COMBO, bridge.toggled.emit)
     hotkey.start()
 
+    # Riconoscimento: hotkey `<ctrl>+<alt>+r`. Se le deps `[vision]` non
+    # sono installate, l'app funziona lo stesso senza riconoscimento.
+    recognize_hotkey = _init_recognize_hotkey(state, team_panel, repository)
+
     if os.environ.get("POKEMON_HELPER_SMOKE") == "1":
         # Modalità smoke: chiudi dopo 2 secondi senza input utente.
         QTimer.singleShot(2000, app.quit)
@@ -89,6 +112,8 @@ def run() -> int:
         return app.exec()
     finally:
         hotkey.stop()
+        if recognize_hotkey is not None:
+            recognize_hotkey.stop()
         repository.close()
 
 
@@ -107,6 +132,65 @@ def _restore_geometry(app: QApplication, window: CompanionWindow, state: AppStat
         return
     geometry = screen.availableGeometry()
     window.move_to(geometry.right() - 380, geometry.top() + 40)
+
+
+def _init_recognize_hotkey(
+    state: AppState,
+    team_panel: TeamPanel,
+    repository: PokemonRepository,
+) -> GlobalHotkey | None:
+    """Registra la hotkey `<ctrl>+<alt>+r` per il riconoscimento avversario.
+
+    Ritorna `None` se le dipendenze `[vision]` non sono installate (in tal
+    caso l'app funziona senza riconoscimento). Il callback della hotkey gira
+    sul thread pynput: cattura il frame, esegue il recognizer e comunica il
+    risultato al thread GUI via `_RecognizeBridge` (Signal cross-thread).
+    """
+    try:
+        from pokemon_helper.vision.capture import CaptureError, WindowCapture
+        from pokemon_helper.vision.ocr import OcrEngine
+        from pokemon_helper.vision.recognizer import Recognizer
+        from pokemon_helper.vision.roi import GAME_ROIS
+    except ImportError as exc:
+        print(f"[vision] deps non installate, riconoscimento disabilitato: {exc}")
+        return None
+
+    capture = WindowCapture("mGBA")
+    recognizer = Recognizer(repository, OcrEngine())
+
+    bridge = _RecognizeBridge()
+    bridge.recognized.connect(team_panel.set_opponent)
+    bridge.failed.connect(lambda msg: print(f"[recognize] {msg}"))
+
+    min_confidence = 0.6
+
+    def on_recognize() -> None:
+        try:
+            game_key = _GAME_BY_GENERATION.get(state.generation)
+            if game_key is None:
+                bridge.failed.emit(f"nessun gioco supportato per Gen {state.generation}")
+                return
+            layout, rois = GAME_ROIS[game_key]
+            frame = capture.capture_frame(timeout_seconds=3.0)
+            result = recognizer.recognize_opponent(frame.image, layout, rois, state.generation)
+            if result is None or result.confidence < min_confidence:
+                bridge.failed.emit(
+                    "nessun match affidabile"
+                    if result is None
+                    else f"confidenza troppo bassa: {result.confidence:.2f}"
+                )
+                return
+            bridge.recognized.emit(result.pokemon_id)
+        except CaptureError as exc:
+            bridge.failed.emit(f"cattura fallita: {exc}")
+        except TimeoutError as exc:
+            bridge.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001 — feedback console, non crash app
+            bridge.failed.emit(f"errore inatteso: {exc}")
+
+    hotkey = GlobalHotkey("<ctrl>+<alt>+r", on_recognize)
+    hotkey.start()
+    return hotkey
 
 
 def _wire_persistence(
