@@ -83,7 +83,34 @@ class TeamPanel(QWidget):
                 padding: 3px 8px;
             }
             QPushButton:hover { background-color: #40405a; }
-            QComboBox, QCheckBox { color: #EAEAEA; }
+            QComboBox {
+                background-color: #303044;
+                color: #EAEAEA;
+                border: 1px solid #4a4a5f;
+                border-radius: 4px;
+                padding: 2px 6px;
+                selection-background-color: #40405a;
+                selection-color: #EAEAEA;
+            }
+            QComboBox::drop-down { border: none; }
+            QComboBox QAbstractItemView {
+                background-color: #202030;
+                color: #EAEAEA;
+                selection-background-color: #40405a;
+                border: 1px solid #4a4a5f;
+            }
+            QCheckBox { color: #EAEAEA; }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                background-color: #303044;
+                border: 1px solid #4a4a5f;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #6890F0;
+                border: 1px solid #6890F0;
+            }
             """
         )
 
@@ -154,6 +181,16 @@ class TeamPanel(QWidget):
         """API pubblica per impostare l'avversario (chiamata da F4 in futuro)."""
         if self._opponent_panel is not None:
             self._opponent_panel.set_opponent(pokemon_id)
+
+    def sync_click_through(self, enabled: bool) -> None:
+        """Aggiorna la checkbox senza riemettere il segnale (evita loop).
+
+        Usato quando lo stato del click-through cambia dall'esterno (es.
+        hotkey globale) e la UI deve rispecchiare il nuovo valore.
+        """
+        self._click_through_check.blockSignals(True)
+        self._click_through_check.setChecked(enabled)
+        self._click_through_check.blockSignals(False)
 
     # ------------------------------------------------------------- handler
 

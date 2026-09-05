@@ -83,7 +83,7 @@ def run() -> int:
     _wire_persistence(overlay, team_panel, state, store, app)
 
     bridge = _HotkeyBridge()
-    bridge.toggled.connect(overlay.toggle_visibility)
+    bridge.toggled.connect(overlay.hotkey_toggle)
     hotkey = GlobalHotkey(DEFAULT_TOGGLE_COMBO, bridge.toggled.emit)
     hotkey.start()
 
@@ -139,8 +139,15 @@ def _wire_persistence(
         # state.team è già stato aggiornato da TeamPanel.
         persist()
 
-    def on_click_through(enabled: bool) -> None:
+    def on_checkbox_toggled(enabled: bool) -> None:
+        # Sorgente: click utente sulla checkbox in header. Applica all'overlay;
+        # sarà `overlay.clickThroughChanged` a occuparsi di persistere.
         overlay.set_click_through(enabled)
+
+    def on_click_through_changed(enabled: bool) -> None:
+        # Sorgente unica di verità: l'overlay emette dopo qualsiasi cambio
+        # (checkbox utente o hotkey). Sincronizza checkbox + salva stato.
+        team_panel.sync_click_through(enabled)
         state.click_through = enabled
         persist()
 
@@ -150,7 +157,8 @@ def _wire_persistence(
         app.quit()
 
     overlay.positionChanged.connect(on_position)
+    overlay.clickThroughChanged.connect(on_click_through_changed)
     team_panel.generationChanged.connect(on_generation)
     team_panel.slotChanged.connect(on_slot)
-    team_panel.clickThroughToggled.connect(on_click_through)
+    team_panel.clickThroughToggled.connect(on_checkbox_toggled)
     team_panel.closeRequested.connect(on_close)

@@ -67,6 +67,21 @@ class OverlayWindow(QWidget):
         """Alterna visibile/nascosto. Chiamare dal thread GUI di Qt."""
         self.setVisible(not self.isVisible())
 
+    def hotkey_toggle(self) -> None:
+        """Comportamento intelligente per la hotkey globale.
+
+        - Se l'overlay è visibile e cliccabile (click-through spento): nasconde.
+        - In tutti gli altri casi (nascosto, oppure visibile con click-through
+          attivo): mostra e disattiva il click-through. Così la hotkey funziona
+          da "kill switch" per riprendere il controllo del pannello.
+        """
+        if self.isVisible() and not self._click_through:
+            self.setVisible(False)
+            return
+        if self._click_through:
+            self.set_click_through(False)
+        self.setVisible(True)
+
     @property
     def click_through_enabled(self) -> bool:
         return self._click_through

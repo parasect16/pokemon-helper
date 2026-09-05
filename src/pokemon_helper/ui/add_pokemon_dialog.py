@@ -42,14 +42,15 @@ class AddPokemonDialog(QDialog):
         modifica uno slot già assegnato.
         """
         super().__init__(parent)
-        self.setWindowTitle("Aggiungi Pokemon")
+        self.setWindowTitle(f"Aggiungi Pokemon — Gen {generation}")
         self.setModal(True)
         self.resize(360, 460)
 
         self._repository = repository
         self._generation = generation
-        # Cache: elenco completo dei Pokemon disponibili nella generazione.
-        # Piccolo (≤649 righe), stare in memoria non è un problema.
+        # Cache: elenco Pokemon disponibili fino alla generazione selezionata
+        # (introduced <= generation). Piccolo (≤649 righe): stare in memoria
+        # non è un problema.
         self._all_pokemon = repository.list_by_generation(generation)
 
         self._build_ui(initial)
@@ -59,6 +60,14 @@ class AddPokemonDialog(QDialog):
 
     def _build_ui(self, initial: TeamSlot | None) -> None:
         layout = QVBoxLayout(self)
+
+        # Info: contatore Pokemon disponibili in questa generazione.
+        info = QLabel(
+            f"{len(self._all_pokemon)} Pokemon disponibili fino a Gen {self._generation}",
+            self,
+        )
+        info.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(info)
 
         # Ricerca
         self._search = QLineEdit(self)
