@@ -41,14 +41,15 @@ class _HotkeyBridge(QObject):
 
 
 class _RecognizeBridge(QObject):
-    """Ponte thread-safe per il riconoscimento asincrono dell'avversario.
+    """Ponte thread-safe per il riconoscimento asincrono in combattimento.
 
-    L'esito del riconoscimento (successo o fallimento) viene emesso come
-    Signal, così l'update della UI avviene nel thread GUI di Qt anche se
-    la chiamata originaria arriva dal thread listener di pynput.
+    Emette segnali distinti per l'avversario e per il Pokemon del giocatore,
+    così l'update della UI avviene nel thread GUI di Qt anche se la chiamata
+    originaria arriva dal thread listener di pynput.
     """
 
-    recognized = Signal(int)  # pokemon_id
+    opponent_recognized = Signal(int)  # pokemon_id avversario
+    player_recognized = Signal(object)  # pokemon_id giocatore, o None
     failed = Signal(str)  # messaggio d'errore human-friendly
 
 
@@ -165,7 +166,8 @@ def _init_recognize_hotkey(
     db_path = default_db_path()
 
     bridge = _RecognizeBridge()
-    bridge.recognized.connect(team_panel.set_opponent)
+    bridge.opponent_recognized.connect(team_panel.set_opponent)
+    bridge.player_recognized.connect(team_panel.set_active_player)
     bridge.failed.connect(lambda msg: print(f"[recognize] {msg}"))
 
     min_confidence = 0.6
@@ -178,18 +180,30 @@ def _init_recognize_hotkey(
                 return
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
-            # Connection dedicata al thread pynput.
+
+            # Riconosci entrambi i lati con una singola cattura, usando
+            # una connection dedicata al thread pynput.
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
-                result = recognizer.recognize_opponent(frame.image, layout, rois, state.generation)
-            if result is None or result.confidence < min_confidence:
+                opp = recognizer.recognize_opponent(frame.image, layout, rois, state.generation)
+                player = recognizer.recognize_player(frame.image, layout, rois, state.generation)
+
+            if opp is None or opp.confidence < min_confidence:
                 bridge.failed.emit(
-                    "nessun match affidabile"
-                    if result is None
-                    else f"confidenza troppo bassa: {result.confidence:.2f}"
+                    "avversario non riconosciuto in modo affidabile"
+                    if opp is None
+                    else f"avversario: confidenza {opp.confidence:.2f} troppo bassa"
                 )
-                return
-            bridge.recognized.emit(result.pokemon_id)
+            else:
+                bridge.opponent_recognized.emit(opp.pokemon_id)
+
+            # Il giocatore è opzionale: se il match non è affidabile, semplicemente
+            # non evidenziamo nulla (nessun errore mostrato: la funzionalità
+            # principale del recognize è l'avversario).
+            if player is not None and player.confidence >= min_confidence:
+                bridge.player_recognized.emit(player.pokemon_id)
+            else:
+                bridge.player_recognized.emit(None)
         except CaptureError as exc:
             bridge.failed.emit(f"cattura fallita: {exc}")
         except TimeoutError as exc:

@@ -59,6 +59,7 @@ class TeamPanel(QWidget):
         self._state = state
         self._slots: list[TeamSlotWidget] = []
         self._opponent_panel: OpponentPanel | None = None
+        self._active_player_id: int | None = None
 
         self._build_ui()
         self._refresh_slots()
@@ -151,11 +152,28 @@ class TeamPanel(QWidget):
             slot_widget.set_slot(self._state.team[index])
         if self._opponent_panel is not None:
             self._opponent_panel.apply_state(self._state)
+        # Riapplica l'evidenziazione (potrebbe essere cambiata la squadra).
+        if self._active_player_id is not None:
+            self.set_active_player(self._active_player_id)
 
     def set_opponent(self, pokemon_id: int | None) -> None:
         """API pubblica per impostare l'avversario (chiamata da F4 in futuro)."""
         if self._opponent_panel is not None:
             self._opponent_panel.set_opponent(pokemon_id)
+
+    def set_active_player(self, pokemon_id: int | None) -> None:
+        """Marca lo slot squadra corrispondente come "attivo" in combattimento.
+
+        Se `pokemon_id` non compare fra gli slot popolati (Pokemon non in
+        squadra), nessuno slot risulta evidenziato — è un no-op silenzioso.
+        Passando `None` si rimuove l'evidenziazione.
+        """
+        self._active_player_id = pokemon_id
+        for index, slot_widget in enumerate(self._slots):
+            slot = self._state.team[index]
+            slot_widget.set_active(
+                slot is not None and pokemon_id is not None and slot.pokemon_id == pokemon_id
+            )
 
     # ------------------------------------------------------------- handler
 
@@ -189,14 +207,22 @@ class TeamSlotWidget(QFrame):
     assignRequested = Signal(int)
     removeRequested = Signal(int)
 
+    _STYLE_INACTIVE = "QFrame#teamSlot { background: transparent; border-radius: 4px; }"
+    _STYLE_ACTIVE = (
+        "QFrame#teamSlot { background: rgba(104, 144, 240, 60); "
+        "border: 1px solid #6890F0; border-radius: 4px; }"
+    )
+
     def __init__(self, index: int, repository: PokemonRepository, generation: int) -> None:
         super().__init__()
         self._index = index
         self._repository = repository
         self._generation = generation
 
+        self.setObjectName("teamSlot")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setStyleSheet("QFrame { background: transparent; }")
+        self.setStyleSheet(self._STYLE_INACTIVE)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
@@ -233,6 +259,10 @@ class TeamSlotWidget(QFrame):
     def set_generation(self, generation: int) -> None:
         """Aggiorna la generazione senza cambiare lo slot corrente."""
         self._generation = generation
+
+    def set_active(self, active: bool) -> None:
+        """Evidenzia lo slot se `active=True` (Pokemon in campo in battaglia)."""
+        self.setStyleSheet(self._STYLE_ACTIVE if active else self._STYLE_INACTIVE)
 
     def set_slot(self, slot: TeamSlot | None) -> None:
         """Renderizza lo slot corrente (o lo stato 'vuoto')."""

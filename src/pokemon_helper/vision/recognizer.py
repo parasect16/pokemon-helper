@@ -61,9 +61,48 @@ class Recognizer:
 
         Ritorna `None` se nessun segnale ha prodotto un candidato.
         """
+        return self._recognize(
+            frame,
+            layout,
+            name_roi=rois.opponent_name,
+            sprite_roi=rois.opponent_sprite,
+            generation=generation,
+        )
+
+    def recognize_player(
+        self,
+        frame: Image.Image,
+        layout: GameLayout,
+        rois: GameRois,
+        generation: int,
+    ) -> Recognition | None:
+        """Riconosce il Pokemon del giocatore (back sprite + HUD basso-dx).
+
+        Stesso schema di `recognize_opponent`: usa le ROI `player_name` e
+        `player_sprite`. Il pHash cerca match sul lato `back` grazie alla
+        stessa scansione — il repository restituisce comunque per pokemon_id.
+        """
+        return self._recognize(
+            frame,
+            layout,
+            name_roi=rois.player_name,
+            sprite_roi=rois.player_sprite,
+            generation=generation,
+        )
+
+    def _recognize(
+        self,
+        frame: Image.Image,
+        layout: GameLayout,
+        *,
+        name_roi,
+        sprite_roi,
+        generation: int,
+    ) -> Recognition | None:
+        """Nucleo condiviso: OCR nome + pHash sprite → combina."""
         game_area = compute_game_area(frame.width, frame.height, layout)
-        name_crop = frame.crop(roi_to_pixels(rois.opponent_name, game_area).as_crop_box())
-        sprite_crop = frame.crop(roi_to_pixels(rois.opponent_sprite, game_area).as_crop_box())
+        name_crop = frame.crop(roi_to_pixels(name_roi, game_area).as_crop_box())
+        sprite_crop = frame.crop(roi_to_pixels(sprite_roi, game_area).as_crop_box())
 
         ocr_results = self._ocr.recognize(name_crop)
         candidate_text = _pick_name_text(ocr_results)

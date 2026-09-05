@@ -77,14 +77,18 @@ LAYOUT_MGBA_GB = GameLayout(aspect_ratio=160 / 144, menu_offset_top=30)
 #   - Giocatore in basso: barra nome+HP in basso-dx, sprite in basso-sx.
 @dataclass(frozen=True, slots=True)
 class GameRois:
-    """Insieme di ROI per un gioco."""
+    """Insieme di ROI per un gioco (avversario + giocatore)."""
 
     opponent_name: Roi
     opponent_sprite: Roi
     opponent_hp_bar: Roi
+    player_name: Roi
+    player_sprite: Roi
+    player_hp_bar: Roi
 
 
 ROIS_FIRERED = GameRois(
+    # --- Avversario (metà alta) ---
     # Nome + livello dell'avversario (solo la riga di testo, HP escluso).
     # Misurato empiricamente su cattura 1119×768 di mGBA (game_area 1107×738,
     # menu 30px). Range approx: y_pixel 145..185, x_pixel 40..470 nel game_area.
@@ -94,6 +98,14 @@ ROIS_FIRERED = GameRois(
     opponent_sprite=Roi(x=0.470, y=0.088, w=0.410, h=0.348),
     # Barra HP avversario: barra colorata dopo la label "PS".
     opponent_hp_bar=Roi(x=0.146, y=0.222, w=0.250, h=0.028),
+    # --- Giocatore (metà bassa) ---
+    # HUD del giocatore in basso-destra: solo la riga del nome+livello
+    # (esclude la barra HP che vive più in basso).
+    player_name=Roi(x=0.545, y=0.550, w=0.400, h=0.048),
+    # Sprite posteriore del giocatore in basso-sinistra.
+    player_sprite=Roi(x=0.100, y=0.470, w=0.290, h=0.310),
+    # Barra HP giocatore: barra colorata "PS ▬▬▬" (prima dei numeri assoluti).
+    player_hp_bar=Roi(x=0.635, y=0.605, w=0.260, h=0.028),
 )
 
 
