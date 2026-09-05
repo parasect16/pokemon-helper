@@ -46,6 +46,7 @@ Desktop.ini
 
 # Project data (large binary assets, downloaded dumps, generated dbs)
 data/sprites/
+data/vendor/
 data/*.sqlite
 data/*.sqlite-journal
 data/raw/
