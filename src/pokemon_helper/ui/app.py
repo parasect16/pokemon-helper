@@ -286,6 +286,22 @@ def _init_recognize_hotkey(
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
                 results = recognizer.recognize_team(frame.image, layout, rois, state.generation)
+
+            # Heuristica anti-sovrascrittura: se non siamo nella schermata
+            # elenco Pokemon, gli slot ROI puntano a pixel di sfondo casuali
+            # e l'OCR restituisce testo vuoto/spurio per la maggior parte
+            # dei 6 slot. Richiediamo almeno 3 slot con testo di lunghezza
+            # >= 3 caratteri, altrimenti manteniamo la squadra corrente.
+            meaningful_slots = sum(
+                1 for r in results if r.ocr_text and len(r.ocr_text.strip()) >= 3
+            )
+            if meaningful_slots < 3:
+                bridge.failed.emit(
+                    "schermata Pokemon non rilevata "
+                    f"({meaningful_slots}/6 slot leggibili) — squadra non aggiornata"
+                )
+                return
+
             new_team = _apply_team_recognition(results, state.team)
             bridge.team_updated.emit(new_team)
         except CaptureError as exc:

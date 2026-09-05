@@ -39,7 +39,7 @@ from pokemon_helper.ui.state import (
     AppState,
     TeamSlot,
 )
-from pokemon_helper.ui.types_meta import color_for, label_it
+from pokemon_helper.ui.types_meta import render_type_badges
 
 
 class TeamPanel(QWidget):
@@ -313,6 +313,7 @@ class TeamSlotWidget(QFrame):
         self._name_label = QLabel("(vuoto)", self)
         name_font = QFont()
         name_font.setBold(True)
+        name_font.setPointSize(11)
         self._name_label.setFont(name_font)
         self._name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(self._name_label, stretch=2)
@@ -322,8 +323,12 @@ class TeamSlotWidget(QFrame):
         layout.addWidget(self._types_label, stretch=3)
 
         self._level_label = QLabel("", self)
-        self._level_label.setFixedWidth(48)
+        self._level_label.setFixedWidth(54)
         self._level_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        level_font = QFont()
+        level_font.setBold(True)
+        level_font.setPointSize(10)
+        self._level_label.setFont(level_font)
         layout.addWidget(self._level_label)
 
         self._edit_btn = QPushButton("…", self)
@@ -369,16 +374,7 @@ class TeamSlotWidget(QFrame):
 
     @staticmethod
     def _render_types(types: tuple[str, ...]) -> str:
-        """Rende i tipi come badge colorati in HTML."""
+        """Rende i tipi come badge colorati in HTML con contrasto auto."""
         if not types:
             return "<i style='color:#aaa'>—</i>"
-        badges: list[str] = []
-        for type_name in types:
-            color = color_for(type_name)
-            label = label_it(type_name)
-            badges.append(
-                f"<span style='background:{color}; color:white; "
-                f"padding:1px 6px; border-radius:6px; margin-right:2px; "
-                f"font-size:11px;'>{label}</span>"
-            )
-        return "".join(badges)
+        return render_type_badges(types, font_size_px=11)

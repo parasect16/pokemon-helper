@@ -82,3 +82,26 @@ def text_color_for(bg_hex: str) -> str:
         return "#fff"
     luminance = 0.299 * r + 0.587 * g + 0.114 * b
     return "#000" if luminance > 160 else "#fff"
+
+
+def render_type_badge(type_name: str, *, font_size_px: int = 12) -> str:
+    """Badge HTML per un singolo tipo, con testo scelto per contrasto sul bg.
+
+    Usato in tutta la UI (slot squadra, opponent panel, elenchi efficacia)
+    per uniformare l'aspetto dei tipi.
+    """
+    bg = color_for(type_name)
+    fg = text_color_for(bg)
+    return (
+        f"<span style='background:{bg}; color:{fg}; padding:2px 8px; "
+        f"border-radius:6px; font-size:{font_size_px}px; font-weight:bold;'>"
+        f"{label_it(type_name)}</span>"
+    )
+
+
+def render_type_badges(types: tuple[str, ...] | list[str], *, font_size_px: int = 12) -> str:
+    """Sequenza di badge separati da un piccolo margine destro."""
+    return "".join(
+        f"<span style='margin-right:3px;'>{render_type_badge(t, font_size_px=font_size_px)}</span>"
+        for t in types
+    )

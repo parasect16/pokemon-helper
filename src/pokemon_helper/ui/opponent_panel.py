@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.engine import EffectivenessEngine
 from pokemon_helper.ui.state import AppState
-from pokemon_helper.ui.types_meta import color_for, label_it, text_color_for
+from pokemon_helper.ui.types_meta import render_type_badge, render_type_badges
 
 SPRITES_ROOT = Path(__file__).resolve().parents[3] / "data" / "vendor" / "sprites"
 
@@ -193,7 +193,7 @@ class OpponentPanel(QWidget):
         name_label.setFont(name_font)
         layout.addWidget(name_label)
 
-        types_label = QLabel(_render_type_badges(types), card)
+        types_label = QLabel(render_type_badges(types), card)
         types_label.setTextFormat(Qt.TextFormat.RichText)
         types_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(types_label)
@@ -241,22 +241,6 @@ def _separator(parent: QWidget) -> QFrame:
     return line
 
 
-def _render_type_badge(type_name: str, *, font_size_px: int = 12) -> str:
-    """Badge HTML per un tipo con testo scelto per contrasto sul bg colorato."""
-    bg = color_for(type_name)
-    fg = text_color_for(bg)
-    return (
-        f"<span style='background:{bg}; color:{fg}; padding:2px 8px; "
-        f"border-radius:6px; font-size:{font_size_px}px; font-weight:bold;'>"
-        f"{label_it(type_name)}</span>"
-    )
-
-
-def _render_type_badges(types: tuple[str, ...]) -> str:
-    """Badge dei tipi per l'intestazione del Pokemon."""
-    return "".join(f"<span style='margin-right:3px;'>{_render_type_badge(t)}</span>" for t in types)
-
-
 def _render_effectiveness_html(defender_types: tuple[str, ...], generation: int) -> str:
     """Efficacia difensiva a colonna: una riga per tipo (badge + moltiplicatore).
 
@@ -284,7 +268,7 @@ def _render_effectiveness_html(defender_types: tuple[str, ...], generation: int)
             return None
         rows: list[str] = []
         for type_name, mult in entries:
-            badge = _render_type_badge(type_name)
+            badge = render_type_badge(type_name)
             mult_text = format_multiplier(mult)
             rows.append(
                 "<tr>"
