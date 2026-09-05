@@ -75,9 +75,30 @@ LAYOUT_MGBA_GB = GameLayout(aspect_ratio=160 / 144, menu_offset_top=30)
 # Layout schermo battaglia Rosso Fuoco (GBA 240×160):
 #   - Avversario in alto: barra nome+HP in alto-sx, sprite in alto-dx.
 #   - Giocatore in basso: barra nome+HP in basso-dx, sprite in basso-sx.
+TEAM_SIZE = 6
+
+
+@dataclass(frozen=True, slots=True)
+class TeamMenuRois:
+    """ROI degli slot squadra nella schermata elenco Pokemon.
+
+    `slot_areas`: 6 rettangoli che coprono nome + livello di ciascuno slot.
+    L'OCR sul crop restituisce due righe (nome, livello) che vengono
+    disambiguate dal recognizer.
+    """
+
+    slot_areas: tuple[Roi, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.slot_areas) != TEAM_SIZE:
+            raise ValueError(
+                f"team menu must define {TEAM_SIZE} slot areas, got {len(self.slot_areas)}"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class GameRois:
-    """Insieme di ROI per un gioco (avversario + giocatore)."""
+    """Insieme di ROI per un gioco (avversario + giocatore + menu squadra)."""
 
     opponent_name: Roi
     opponent_sprite: Roi
@@ -85,6 +106,7 @@ class GameRois:
     player_name: Roi
     player_sprite: Roi
     player_hp_bar: Roi
+    team_menu: TeamMenuRois
 
 
 ROIS_FIRERED = GameRois(
@@ -106,6 +128,26 @@ ROIS_FIRERED = GameRois(
     player_sprite=Roi(x=0.100, y=0.470, w=0.290, h=0.310),
     # Barra HP giocatore: barra colorata "PS ▬▬▬" (prima dei numeri assoluti).
     player_hp_bar=Roi(x=0.635, y=0.605, w=0.260, h=0.028),
+    # --- Menu Pokemon ---
+    # Layout Rosso Fuoco: slot 1 grande a sinistra (Pokemon "attivo"), slot 2-6
+    # righe compatte a destra. Ciascun ROI comprende sia il nome sia la riga
+    # del livello: `_pick_name_text` filtra la riga "L.XX" già oggi.
+    team_menu=TeamMenuRois(
+        slot_areas=(
+            # Slot 1 (Pokemon attivo, box grande sinistra).
+            Roi(x=0.160, y=0.265, w=0.215, h=0.095),
+            # Slot 2 (prima riga compatta a destra: Gloom nel test).
+            Roi(x=0.473, y=0.122, w=0.199, h=0.095),
+            # Slot 3.
+            Roi(x=0.473, y=0.265, w=0.199, h=0.095),
+            # Slot 4.
+            Roi(x=0.473, y=0.414, w=0.199, h=0.095),
+            # Slot 5.
+            Roi(x=0.473, y=0.556, w=0.199, h=0.095),
+            # Slot 6 (ultima riga compatta).
+            Roi(x=0.473, y=0.706, w=0.199, h=0.095),
+        ),
+    ),
 )
 
 

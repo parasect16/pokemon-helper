@@ -50,6 +50,7 @@ class _RecognizeBridge(QObject):
 
     opponent_recognized = Signal(int)  # pokemon_id avversario
     player_recognized = Signal(object)  # pokemon_id giocatore, o None
+    team_updated = Signal(object)  # list[TeamSlot | None] con nuovo team
     failed = Signal(str)  # messaggio d'errore human-friendly
 
 
@@ -168,6 +169,7 @@ def _init_recognize_hotkey(
     bridge = _RecognizeBridge()
     bridge.opponent_recognized.connect(team_panel.set_opponent)
     bridge.player_recognized.connect(team_panel.set_active_player)
+    bridge.team_updated.connect(team_panel.replace_team)
     bridge.failed.connect(lambda msg: print(f"[recognize] {msg}"))
 
     min_confidence = 0.6
@@ -211,9 +213,74 @@ def _init_recognize_hotkey(
         except Exception as exc:  # noqa: BLE001 — feedback console, non crash app
             bridge.failed.emit(f"errore inatteso: {exc}")
 
+    def on_recognize_team() -> None:
+        try:
+            game_key = _GAME_BY_GENERATION.get(state.generation)
+            if game_key is None:
+                bridge.failed.emit(f"nessun gioco supportato per Gen {state.generation}")
+                return
+            layout, rois = GAME_ROIS[game_key]
+            frame = capture.capture_frame(timeout_seconds=3.0)
+            with PokemonRepository.open(db_path) as thread_repo:
+                recognizer = Recognizer(thread_repo, ocr)
+                results = recognizer.recognize_team(frame.image, layout, rois, state.generation)
+            new_team = _apply_team_recognition(results, state.team)
+            bridge.team_updated.emit(new_team)
+        except CaptureError as exc:
+            bridge.failed.emit(f"cattura fallita: {exc}")
+        except TimeoutError as exc:
+            bridge.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            bridge.failed.emit(f"team recognize error: {exc}")
+
     hotkey = GlobalHotkey("<ctrl>+<alt>+r", on_recognize)
     hotkey.start()
-    return hotkey
+    team_hotkey = GlobalHotkey("<ctrl>+<alt>+t", on_recognize_team)
+    team_hotkey.start()
+    # Ritorniamo una tupla, ma i chiamanti attuali gestiscono un solo hotkey:
+    # per compatibilità restituiamo un oggetto composito che espone `.stop()`.
+    return _HotkeyGroup([hotkey, team_hotkey])
+
+
+class _HotkeyGroup:
+    """Piccolo aggregatore di GlobalHotkey con un unico `.stop()`."""
+
+    def __init__(self, hotkeys: list) -> None:
+        self._hotkeys = hotkeys
+
+    def stop(self) -> None:
+        for hk in self._hotkeys:
+            try:
+                hk.stop()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[hotkey] errore stop: {exc}")
+
+
+def _apply_team_recognition(results, current_team) -> list:
+    """Combina i risultati del recognize_team con il team corrente.
+
+    Regole:
+    - Slot con `pokemon_id` valido → nuovo `TeamSlot` (livello letto, fallback
+      al livello esistente per lo stesso Pokemon, altrimenti 50).
+    - Slot senza match ma con testo OCR non vuoto (tipicamente un nickname
+      sconosciuto): preserva lo slot corrispondente del team corrente.
+    - Slot con OCR vuoto → slot vuoto (`None`).
+    """
+    current_levels: dict[int, int] = {
+        slot.pokemon_id: slot.level for slot in current_team if slot is not None
+    }
+    new_team: list = []
+    for result in results:
+        if result.pokemon_id is not None:
+            level = result.level or current_levels.get(result.pokemon_id, 50)
+            new_team.append(TeamSlot(pokemon_id=result.pokemon_id, level=level))
+        elif result.ocr_text.strip():
+            new_team.append(current_team[result.slot_index])
+        else:
+            new_team.append(None)
+    while len(new_team) < len(current_team):
+        new_team.append(None)
+    return new_team[: len(current_team)]
 
 
 def _wire_persistence(
@@ -240,6 +307,11 @@ def _wire_persistence(
         # `state.team` è già stato aggiornato da TeamPanel.
         persist()
 
+    def on_team_replaced(_new_team) -> None:
+        # `state.team` è già stato aggiornato da TeamPanel.replace_team.
+        persist()
+
     window.positionChanged.connect(on_position)
     team_panel.generationChanged.connect(on_generation)
     team_panel.slotChanged.connect(on_slot)
+    team_panel.teamReplaced.connect(on_team_replaced)

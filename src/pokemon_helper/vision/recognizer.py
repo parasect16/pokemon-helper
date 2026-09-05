@@ -29,6 +29,8 @@ from pokemon_helper.vision.sprite_hash import compute_phash
 
 # Pattern per riconoscere l'indicatore di livello: es. "L.33", "L 33", "Lv.33".
 _LEVEL_PATTERN = re.compile(r"^l\.?v?\.?\s*\d+$", re.IGNORECASE)
+# Pattern che ESTRAE il numero di livello (usato per popolare TeamSlot.level).
+_LEVEL_EXTRACT = re.compile(r"l\.?v?\.?\s*(\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +43,21 @@ class Recognition:
     name_score: float | None = None
     sprite_distance: int | None = None
     debug: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class TeamRecognition:
+    """Esito del riconoscimento di uno slot della squadra dal menu Pokemon.
+
+    `pokemon_id=None` significa "nessun match affidabile" (nickname sconosciuto,
+    OCR fallito, slot vuoto). `level=None` significa livello non decifrato.
+    """
+
+    slot_index: int  # 0..5, ordine visivo dello schermo (0 = attivo)
+    pokemon_id: int | None
+    level: int | None
+    confidence: float
+    ocr_text: str
 
 
 class Recognizer:
@@ -89,6 +106,57 @@ class Recognizer:
             sprite_roi=rois.player_sprite,
             generation=generation,
         )
+
+    def recognize_team(
+        self,
+        frame: Image.Image,
+        layout: GameLayout,
+        rois: GameRois,
+        generation: int,
+        *,
+        min_similarity: float = 0.55,
+    ) -> list[TeamRecognition]:
+        """Riconosce i 6 slot della squadra dalla schermata elenco Pokemon.
+
+        Per ciascuno slot esegue OCR sul riquadro (nome + livello), separa
+        le due righe con `_pick_name_text` e `_extract_level`, poi fa fuzzy
+        match sul nome. Ritorna sempre 6 elementi in ordine visivo dello
+        schermo (slot 1 = Pokemon attivo, poi 2..6). Un elemento con
+        `pokemon_id is None` indica match assente (nickname sconosciuto,
+        OCR fallito, slot vuoto).
+
+        pHash non è utilizzato qui: le icone del menu non sono indicizzate
+        (il DB contiene solo sprite front/back dei giochi, non le mini-icone).
+        """
+        game_area = compute_game_area(frame.width, frame.height, layout)
+        results: list[TeamRecognition] = []
+        for index, slot_roi in enumerate(rois.team_menu.slot_areas):
+            crop = frame.crop(roi_to_pixels(slot_roi, game_area).as_crop_box())
+            ocr_lines = self._ocr.recognize(crop)
+            name_text = _pick_name_text(ocr_lines)
+            level = _extract_level(ocr_lines)
+
+            pokemon_id: int | None = None
+            confidence = 0.0
+            if name_text:
+                candidates = self._repo.find_by_fuzzy_name(
+                    name_text, generation, min_similarity=min_similarity, limit=1
+                )
+                if candidates:
+                    pokemon, score = candidates[0]
+                    pokemon_id = pokemon.id
+                    confidence = score
+
+            results.append(
+                TeamRecognition(
+                    slot_index=index,
+                    pokemon_id=pokemon_id,
+                    level=level,
+                    confidence=confidence,
+                    ocr_text=name_text or "",
+                )
+            )
+        return results
 
     def _recognize(
         self,
@@ -155,6 +223,35 @@ def _strip_non_alpha_tail(text: str) -> str:
     while trimmed and not trimmed[-1].isalpha():
         trimmed = trimmed[:-1]
     return trimmed
+
+
+def _extract_level(ocr_lines: list[OcrResult]) -> int | None:
+    """Estrae il livello (1-100) dai risultati OCR.
+
+    Priorità:
+    1. Pattern `L.XX` / `Lv.XX` (l'OCR spesso lo restituisce così).
+    2. Riga composta solo di cifre in [1, 100] (RapidOCR ogni tanto scarta il
+       prefisso "L." su font pixel piccoli).
+    """
+    for result in ocr_lines:
+        match = _LEVEL_EXTRACT.search(result.text)
+        if match:
+            try:
+                level = int(match.group(1))
+            except ValueError:
+                continue
+            if 1 <= level <= 100:
+                return level
+    for result in ocr_lines:
+        text = result.text.strip()
+        if text.isdigit():
+            try:
+                level = int(text)
+            except ValueError:
+                continue
+            if 1 <= level <= 100:
+                return level
+    return None
 
 
 def _combine(

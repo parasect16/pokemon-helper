@@ -47,6 +47,7 @@ class TeamPanel(QWidget):
 
     generationChanged = Signal(int)
     slotChanged = Signal(int, object)  # (index, TeamSlot | None)
+    teamReplaced = Signal(object)  # nuovo team completo (list[TeamSlot | None])
 
     def __init__(
         self,
@@ -160,6 +161,19 @@ class TeamPanel(QWidget):
         """API pubblica per impostare l'avversario (chiamata da F4 in futuro)."""
         if self._opponent_panel is not None:
             self._opponent_panel.set_opponent(pokemon_id)
+
+    def replace_team(self, new_team: list[TeamSlot | None]) -> None:
+        """Rimpiazza il team con la lista fornita (esattamente `TEAM_SIZE` slot).
+
+        Aggiorna `state.team`, ridisegna gli slot, riapplica l'evidenziazione
+        del Pokemon attivo (se ancora presente nel nuovo team) e propaga
+        `teamReplaced` per far persistere lo stato al layer app.
+        """
+        if len(new_team) != TEAM_SIZE:
+            raise ValueError(f"replace_team richiede {TEAM_SIZE} slot, ricevuti {len(new_team)}")
+        self._state.team = list(new_team)
+        self._refresh_slots()
+        self.teamReplaced.emit(self._state.team)
 
     def set_active_player(self, pokemon_id: int | None) -> None:
         """Marca lo slot squadra corrispondente come "attivo" in combattimento.
