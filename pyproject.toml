@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pokemon-helper"
+version = "0.0.1"
+description = "Windows overlay assistant for Pokemon emulators (Gen 1-5)"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { text = "MIT" }
+authors = [{ name = "Flavio Paravisi" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+]
+# Windows-only runtime deps added in later phases (F2+):
+#   PySide6, windows-capture, rapidocr-onnxruntime, imagehash, pillow
+app = []
+
+[project.scripts]
+pokemon-helper = "pokemon_helper.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pokemon_helper"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
