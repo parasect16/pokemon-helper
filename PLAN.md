@@ -98,6 +98,11 @@ L'ordine è pensato per produrre qualcosa di utilizzabile alla fase F2, senza di
 
 Costruire il dump offline: pokedex con identificativi, nomi in italiano e inglese, tipi per generazione, sprite per generazione, tabelle dei tipi per generazione. Nessuna dipendenza da Windows: sviluppabile in WSL.
 
+Suddivisione operativa in due sotto-fasi indipendenti:
+
+- **F0.1 — dati tabulari (fatto)**. Fonte: `veekun/pokedex` clonato in shallow mode. Costruisce `data/pokemon.sqlite` con specie, nomi IT/EN, tipi per generazione. Le eccezioni storiche di tipo che veekun non esporta in CSV (linea Magnemite in Gen 1) vivono in `TYPE_HISTORY_OVERRIDES` dentro `scripts/build_dataset.py`.
+- **F0.2 — sprite + perceptual hash (rimandato dopo F2)**. Fonte iniziale: la directory `pokedex/data/media/sprites/pokemon/` del clone veekun già presente, che copre i giochi principali di ogni generazione. Se la coverage si dimostrasse insufficiente (sprite di gioco specifico mancante), migrare a un clone `--filter=blob:none --sparse` di `PokeAPI/sprites` limitato a `sprites/pokemon/versions/generation-{i..v}/` (~50-80 MB invece dei ~400 MB del repo completo). Nessuna dipendenza a runtime dai binari Windows: i pHash sono calcolabili anche da WSL.
+
 ### F1 — Motore di efficacia
 
 Input: tipi dell'attaccante, tipi del difensore, generazione. Output: moltiplicatore offensivo per ciascun tipo di mossa e vulnerabilità difensive del difensore.
@@ -107,6 +112,8 @@ Copertura di test obbligatoria sui casi limite elencati nella sezione 5: le ecce
 ### F2 — Overlay Windows con inserimento manuale
 
 Pannello con la squadra sempre in primo piano, trascinabile, con posizione persistita fra le sessioni, click-through opzionale e hotkey globale per mostrare e nascondere. La squadra viene inserita manualmente.
+
+Ogni slot della squadra conserva l'id del Pokemon e il livello (1-100). La generazione di riferimento è selezionabile via dropdown in UI. Persistenza dello stato in `%APPDATA%\pokemon-helper\state.json`. Hotkey globale gestita con `pynput`.
 
 Al termine di questa fase il tool è già utilizzabile.
 
