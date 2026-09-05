@@ -1,6 +1,6 @@
 # HANDOFF — pokemon-helper
 
-Passaggio per nuova sessione o nuovo collaboratore. Stato al **2026-09-05**.
+Passaggio per nuova sessione o nuovo collaboratore. Stato al **2026-09-06**.
 
 Vedi [`PLAN.md`](PLAN.md) per roadmap, [`CLAUDE.md`](CLAUDE.md) per convenzioni.
 
@@ -9,8 +9,9 @@ Vedi [`PLAN.md`](PLAN.md) per roadmap, [`CLAUDE.md`](CLAUDE.md) per convenzioni.
 Tool desktop Windows. Affianca emulatore Pokemon Gen 1-5 con pannello sempre in primo piano. Funzionalità:
 
 - **Squadra manuale**: 6 slot nome + livello, generazione selezionabile. Persistenza in `%APPDATA%\pokemon-helper\state.json`.
-- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR nome + pHash sprite, in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione).
-- **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR per ciascuno dei 6 slot, fuzzy match nome, sovrascrive `state.team`. Schermata non menu Pokemon → squadra non aggiornata (heuristic su numero slot leggibili).
+- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR nome + pHash sprite, in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione). Guardia `is_battle_screen` blocca l'update se la ROI HP avversario non ha pixel colore-HP (schermata non-battaglia → warning ⚠).
+- **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR per ciascuno dei 6 slot, fuzzy match nome, sovrascrive `state.team`. Guard doppia: <3/6 slot leggibili o stesso pokemon_id in ≥2 slot → aggiornamento bloccato.
+- **Mappa nickname** (pulsante `🏷`): dialog per associare nickname custom (es. "FIAMMETTA") a un pokemon_id. Recognizer consulta la mappa prima del fuzzy match. Persistita in `state.json`.
 - **OpponentPanel**: due card affiancate (player | avversario) con sprite Pokedex, nome, tipi, tabella efficacia difensiva colorata (Debolezze / Resistenze / Immune, neutri esclusi).
 - **Hotkey globale** (`Ctrl+Alt+P`): mostra / minimizza finestra.
 - **Feedback pulsanti**: ✓ verde su successo 10 s, ⚠ giallo su fallimento (motivo in tooltip).
@@ -56,6 +57,7 @@ scripts/
   recognize_test.py          # end-to-end recognize opponent
   recognize_team_test.py     # end-to-end recognize squadra
   player_debug.py            # end-to-end recognize player (con crop + overlay)
+  extract_roi_from_annotated.py  # bbox per colore da PNG annotato → coord Roi
 
 tests/
   engine/ data/ ui/ vision/  # pytest, 114 test, 100% branch coverage engine+data.
@@ -87,16 +89,17 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 | F0.2 | ✅ done | Sprite front/back/icon indicizzati da PokeAPI/sprites (~10k righe). |
 | F1   | ✅ done | `EffectivenessEngine`, `compute_matchup`, 100% test. |
 | F2   | ✅ done | Companion window nativa con chrome Windows, hotkey, persistenza. |
-| F3   | 🟡 usable | mGBA + Rosso Fuoco. Detail dei sotto-step in `PLAN.md` §6. |
-| F4   | ⏳ da fare | Auto-detect combattimento via HP-bar template match. |
+| F3   | ✅ usable | mGBA + Rosso Fuoco. 16 sotto-step in `PLAN.md` §6. Team 5/6 con nome default OK, nickname custom via mappa utente. |
+| F4   | ⏳ da fare | Auto-detect combattimento via HP-bar template match. Metà del lavoro già fatta in `battle_detector.is_battle_screen`. |
 
 ## 6. Limitazioni note (da PLAN §7)
 
 - **OCR livello (`L.XX`) su font pixel**: RapidOCR poco affidabile, solo alcuni slot danno numero. Fallback: livello preservato, editabile via `…`.
 - **Match icona menu Pokemon**: pHash/dhash rumorosi anche col color-key HSV. Valutare template matching per game se conta.
-- **ROI hardcoded**: solo FRLG a scala mGBA con menu bar visibile. Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi.
+- **Chrome mGBA hardcoded 52 px**: title bar + menu bar misurati sulla macchina utente (Win10 Pro DPI 100%). Su Win11 o DPI diverse serve auto-detect (scan prima riga teal del frame).
+- **ROI hardcoded**: solo FRLG a scala mGBA. Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi. Parzialmente coperto da `extract_roi_from_annotated.py` (offline).
 - **Ambiente**: F2/F3/F4 richiedono Windows nativo (COM + Windows Graphics Capture + hotkey Win32). Logica pura (`engine/`, `data/`) ovunque, anche WSL/Linux.
-- **Nickname Pokemon**: fuzzy match non li riconosce. Team recognize preserva slot corrispondente se OCR legge qualcosa senza match — vedi `_apply_team_recognition`.
+- **Nickname Pokemon**: fuzzy match non li riconosce. Fix via mappa utente `state.nicknames` (dialog 🏷). Fallback: `_apply_team_recognition` preserva slot corrispondente.
 
 ## 7. Prossimi step suggeriti
 
@@ -117,7 +120,7 @@ Ordinati per valore/costo:
 
 ## 9. File di stato utente
 
-`%APPDATA%\pokemon-helper\state.json`: JSON con `generation`, `team[6]` (id + livello), `overlay_x`, `overlay_y`. Rigenerato al primo salvataggio se assente. Chiavi non riconosciute ignorate silenziosamente (es. vecchia `click_through`).
+`%APPDATA%\pokemon-helper\state.json`: JSON con `generation`, `team[6]` (id + livello), `overlay_x`, `overlay_y`, `nicknames` (dict UPPERCASE → pokemon_id). Rigenerato al primo salvataggio se assente. Chiavi non riconosciute ignorate silenziosamente (es. vecchia `click_through`); `nicknames` mancante = dict vuoto (compat pre-F3.16).
 
 ## 10. Dove chiedere
 

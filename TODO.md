@@ -53,9 +53,13 @@ Convenzioni:
 - `[ ]` **Ability-based type modifiers** (Levitazione = immune a Ground,
   Assorbivolt = immune a Electric, ecc.). Estende `EffectivenessEngine` con
   secondo layer.
-- `[ ]` **Nickname map utente**: dialog per associare a mano nickname →
-  species, salvato in `state.json`. Team recognize usa mappa quando OCR legge
-  nickname noto.
+- `[x]` **Nickname map utente** (commit 13dd606): dialog 🏷 per associare
+  nickname → species, salvato in `state.json`. Team recognize usa mappa
+  prima del fuzzy match.
+- `[ ]` **Auto-detect chrome mGBA**: `LAYOUT_MGBA_GBA.menu_offset_top=52`
+  hardcoded per Win10 Pro DPI 100%. Su Win11 o DPI diverse cambia. Fix:
+  scan prima riga teal (bg gioco) sul frame catturato per calcolare offset
+  dinamicamente. ~1h.
 
 ## Da fare — infra
 
