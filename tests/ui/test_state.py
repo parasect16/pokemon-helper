@@ -116,11 +116,48 @@ def test_state_store_roundtrip_preserves_full_state(tmp_path: Path) -> None:
         ],
         overlay_x=100,
         overlay_y=200,
+        nicknames={"FIAMMETTA": 6, "SPARKY": 25},
     )
     store = StateStore(tmp_path / "state.json")
     store.save(original)
     restored = store.load()
     assert restored == original
+    assert restored.nicknames == {"FIAMMETTA": 6, "SPARKY": 25}
+
+
+def test_state_store_normalizes_nicknames_to_uppercase(tmp_path: Path) -> None:
+    """Nickname deserializzati vengono uppercased per matching case-insensitive."""
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps(
+            {
+                "generation": 3,
+                "team": [None] * TEAM_SIZE,
+                "overlay_x": None,
+                "overlay_y": None,
+                "nicknames": {"fiammetta": 6, "Sparky": "25"},
+            }
+        )
+    )
+    state = StateStore(path).load()
+    assert state.nicknames == {"FIAMMETTA": 6, "SPARKY": 25}
+
+
+def test_state_store_load_without_nicknames_key_defaults_to_empty(tmp_path: Path) -> None:
+    """File state.json pre-nicknames deve caricare con dict vuoto (no crash)."""
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps(
+            {
+                "generation": 3,
+                "team": [None] * TEAM_SIZE,
+                "overlay_x": None,
+                "overlay_y": None,
+            }
+        )
+    )
+    state = StateStore(path).load()
+    assert state.nicknames == {}
 
 
 def test_state_store_ignores_unknown_keys(tmp_path: Path) -> None:

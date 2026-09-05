@@ -24,10 +24,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.ui.hotkey import DEFAULT_TOGGLE_COMBO, GlobalHotkey
+from pokemon_helper.ui.nickname_dialog import NicknameDialog
 from pokemon_helper.ui.overlay import CompanionWindow
 from pokemon_helper.ui.state import AppState, StateStore, TeamSlot, default_state_path
 from pokemon_helper.ui.team_panel import TeamPanel
@@ -138,6 +139,7 @@ def run() -> int:
     window.show()
 
     _wire_persistence(window, team_panel, state, store)
+    _wire_nickname_dialog(window, team_panel, repository, state, store)
 
     bridge = _HotkeyBridge()
     bridge.toggled.connect(window.toggle_visibility)
@@ -309,7 +311,13 @@ def _init_recognize_hotkey(
             frame = capture.capture_frame(timeout_seconds=3.0)
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
-                results = recognizer.recognize_team(frame.image, layout, rois, state.generation)
+                results = recognizer.recognize_team(
+                    frame.image,
+                    layout,
+                    rois,
+                    state.generation,
+                    nickname_map=state.nicknames,
+                )
 
             looks_menu, reason = _team_snapshot_looks_like_menu(results)
             if not looks_menu:
@@ -408,6 +416,25 @@ def _apply_team_recognition(results, current_team) -> list:
     while len(new_team) < len(current_team):
         new_team.append(None)
     return new_team[: len(current_team)]
+
+
+def _wire_nickname_dialog(
+    window: CompanionWindow,
+    team_panel: TeamPanel,
+    repository: PokemonRepository,
+    state: AppState,
+    store: StateStore,
+) -> None:
+    """Apri `NicknameDialog` quando l'utente clicca il pulsante 🏷."""
+
+    def on_open() -> None:
+        dialog = NicknameDialog(repository, state.generation, state.nicknames, parent=window)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        state.nicknames = dialog.nicknames()
+        store.save(state)
+
+    team_panel.nicknamesRequested.connect(on_open)
 
 
 def _wire_persistence(

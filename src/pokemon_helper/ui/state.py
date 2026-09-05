@@ -42,12 +42,18 @@ class AppState:
 
     `team` è sempre una lista di lunghezza `TEAM_SIZE`; ogni elemento è uno
     `TeamSlot` oppure `None` per indicare uno slot vuoto.
+
+    `nicknames` mappa testo OCR (normalizzato uppercase) a `pokemon_id`, usato
+    da `Recognizer.recognize_team` come override sul fuzzy match: quando il
+    gioco mostra un nickname custom (es. "FIAMMETTA" per Charizard), fuzzy
+    fallisce ma il mapping utente risolve.
     """
 
     generation: int = DEFAULT_GENERATION
     team: list[TeamSlot | None] = field(default_factory=lambda: [None] * TEAM_SIZE)
     overlay_x: int | None = None
     overlay_y: int | None = None
+    nicknames: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not MIN_GENERATION <= self.generation <= MAX_GENERATION:
@@ -122,6 +128,7 @@ def _serialize(state: AppState) -> dict:
         ],
         "overlay_x": state.overlay_x,
         "overlay_y": state.overlay_y,
+        "nicknames": dict(state.nicknames),
     }
 
 
@@ -140,11 +147,16 @@ def _deserialize(payload: dict) -> AppState:
             team.append(None)
         else:
             team.append(TeamSlot(pokemon_id=int(entry["pokemon_id"]), level=int(entry["level"])))
+    raw_nicknames = payload.get("nicknames") or {}
+    if not isinstance(raw_nicknames, dict):
+        raise TypeError("nicknames must be a dict")
+    nicknames = {str(k).upper(): int(v) for k, v in raw_nicknames.items()}
     return AppState(
         generation=int(payload["generation"]),
         team=team,
         overlay_x=_optional_int(payload.get("overlay_x")),
         overlay_y=_optional_int(payload.get("overlay_y")),
+        nicknames=nicknames,
     )
 
 

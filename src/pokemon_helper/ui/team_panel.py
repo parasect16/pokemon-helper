@@ -50,6 +50,7 @@ class TeamPanel(QWidget):
     teamReplaced = Signal(object)  # nuovo team completo (list[TeamSlot | None])
     reloadTeamRequested = Signal()  # utente ha cliccato "Ricarica squadra"
     reloadOpponentRequested = Signal()  # utente ha cliccato "Ricarica avversario"
+    nicknamesRequested = Signal()  # utente ha cliccato "Nickname"
 
     def __init__(
         self,
@@ -155,6 +156,12 @@ class TeamPanel(QWidget):
         )
         self._reload_opp_btn.clicked.connect(lambda: self.reloadOpponentRequested.emit())
         row.addWidget(self._reload_opp_btn)
+
+        self._nicknames_btn = QPushButton("🏷", self)
+        self._nicknames_btn.setToolTip("Gestisci nickname personalizzati (nick → specie)")
+        self._nicknames_btn.setFixedWidth(30)
+        self._nicknames_btn.clicked.connect(lambda: self.nicknamesRequested.emit())
+        row.addWidget(self._nicknames_btn)
 
         row.addStretch(1)
         return row

@@ -124,19 +124,28 @@ class Recognizer:
         *,
         min_similarity: float = 0.55,
         icon_max_distance: int = 18,
+        nickname_map: dict[str, int] | None = None,
     ) -> list[TeamRecognition]:
         """Riconosce i 6 slot della squadra dalla schermata elenco Pokemon.
 
         Per ciascun slot:
         1. OCR sul riquadro nome + livello, `_pick_name_text` sceglie il testo
            e `_extract_level` prende il numero.
-        2. Fuzzy match sul nome via repository.
-        3. Se il fuzzy non trova nulla (probabile nickname), fallback su pHash
-           dell'icona menu contro il subset `side='icon'` di `sprite_hashes`.
+        2. Se il testo OCR (uppercase) è in `nickname_map`, usa direttamente
+           il `pokemon_id` mappato con confidenza 1.0 (source='nickname').
+        3. Altrimenti fuzzy match sul nome via repository.
+        4. Se il fuzzy non trova nulla (probabile nickname sconosciuto),
+           fallback su pHash dell'icona menu contro il subset `side='icon'`
+           di `sprite_hashes`.
+
+        `nickname_map` mappa testo OCR normalizzato uppercase → `pokemon_id`.
+        Serve per gestire nickname custom del giocatore (es. "FIAMMETTA" =
+        Charizard) senza dover cambiare nome nel gioco.
 
         Ritorna sempre 6 elementi in ordine visivo (slot 1 = Pokemon attivo).
-        Un elemento con `pokemon_id is None` indica match assente da entrambi
-        i canali (nickname + icona non riconosciuta o slot vuoto).
+        Un elemento con `pokemon_id is None` indica match assente da tutti
+        i canali (nickname non mappato + fuzzy fallito + icona non
+        riconosciuta, o slot vuoto).
         """
         game_area = compute_game_area(frame.width, frame.height, layout)
         results: list[TeamRecognition] = []
@@ -158,7 +167,13 @@ class Recognizer:
             pokemon_id: int | None = None
             confidence = 0.0
             source = "none"
-            if name_text:
+            if name_text and nickname_map:
+                mapped = nickname_map.get(name_text.strip().upper())
+                if mapped is not None:
+                    pokemon_id = mapped
+                    confidence = 1.0
+                    source = "nickname"
+            if pokemon_id is None and name_text:
                 candidates = self._repo.find_by_fuzzy_name(
                     name_text, generation, min_similarity=min_similarity, limit=1
                 )
