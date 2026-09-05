@@ -87,14 +87,18 @@ def run() -> int:
     hotkey = GlobalHotkey(DEFAULT_TOGGLE_COMBO, bridge.toggled.emit)
     hotkey.start()
 
-    app.aboutToQuit.connect(hotkey.stop)
-    app.aboutToQuit.connect(repository.close)
-
     if os.environ.get("POKEMON_HELPER_SMOKE") == "1":
         # Modalità smoke: chiudi dopo 2 secondi senza input utente.
         QTimer.singleShot(2000, app.quit)
 
-    return app.exec()
+    # Cleanup dopo che il loop principale è terminato: eseguire dentro
+    # aboutToQuit poteva deadlockare con il thread listener di pynput
+    # durante lo shutdown di Qt su Windows.
+    try:
+        return app.exec()
+    finally:
+        hotkey.stop()
+        repository.close()
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +156,10 @@ def _wire_persistence(
         persist()
 
     def on_close() -> None:
-        # `Qt.Tool` non conta per quitOnLastWindowClosed: chiediamo quit esplicito.
-        overlay.close()
+        # `Qt.Tool` non conta per quitOnLastWindowClosed: chiediamo quit
+        # esplicito. Evitiamo `overlay.close()`: con overlay traslucido +
+        # click-through poteva bloccare il teardown, mentre `app.quit()`
+        # da solo chiude il loop e il finally in `run()` fa il resto.
         app.quit()
 
     overlay.positionChanged.connect(on_position)

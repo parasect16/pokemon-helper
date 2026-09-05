@@ -67,12 +67,18 @@ class TeamPanel(QWidget):
 
     def _build_ui(self) -> None:
         self.setObjectName("teamPanel")
-        # Sfondo scuro semi-trasparente + bordi arrotondati.
+        # Sfondo scuro opaco + bordi arrotondati. La title bar sopra ha un
+        # colore leggermente diverso per segnalarla come area di drag.
         self.setStyleSheet(
             """
             #teamPanel {
-                background-color: rgba(20, 20, 30, 220);
+                background-color: rgb(20, 20, 30);
                 border-radius: 12px;
+            }
+            #titleBar {
+                background-color: rgb(38, 38, 54);
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
             }
             QLabel { color: #EAEAEA; }
             QPushButton {
@@ -115,21 +121,69 @@ class TeamPanel(QWidget):
         )
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(10, 8, 10, 10)
+        outer.setContentsMargins(0, 0, 0, 10)
         outer.setSpacing(6)
 
-        outer.addLayout(self._build_header())
+        outer.addWidget(self._build_title_bar())
 
+        header_container = QHBoxLayout()
+        header_container.setContentsMargins(10, 0, 10, 0)
+        header_container.addLayout(self._build_header())
+        outer.addLayout(header_container)
+
+        slots_container = QVBoxLayout()
+        slots_container.setContentsMargins(10, 0, 10, 0)
+        slots_container.setSpacing(6)
         for index in range(TEAM_SIZE):
             slot = TeamSlotWidget(index, self._repository, self._state.generation)
             slot.assignRequested.connect(self._open_dialog_for_slot)
             slot.removeRequested.connect(self._clear_slot)
             self._slots.append(slot)
-            outer.addWidget(slot)
+            slots_container.addWidget(slot)
+        outer.addLayout(slots_container)
 
         # Sezione avversario: placeholder finché F4 non imposta un ID.
+        opponent_container = QHBoxLayout()
+        opponent_container.setContentsMargins(10, 0, 10, 0)
         self._opponent_panel = OpponentPanel(self._repository, self._state)
-        outer.addWidget(self._opponent_panel)
+        opponent_container.addWidget(self._opponent_panel)
+        outer.addLayout(opponent_container)
+
+    def _build_title_bar(self) -> QWidget:
+        """Barra superiore solida: label + area drag + pulsante chiudi."""
+        bar = QWidget(self)
+        bar.setObjectName("titleBar")
+        bar.setFixedHeight(28)
+
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(10, 0, 6, 0)
+        layout.setSpacing(4)
+
+        # Icona-grip (usa un carattere unicode al posto di un asset).
+        grip = QLabel("⋮⋮", bar)
+        grip.setStyleSheet("color: #7a7a8a; font-size: 12px;")
+        layout.addWidget(grip)
+
+        title = QLabel("pokemon-helper", bar)
+        title.setStyleSheet("color: #EAEAEA; font-weight: bold;")
+        layout.addWidget(title)
+
+        layout.addStretch(1)
+
+        close_btn = QPushButton("×", bar)
+        close_btn.setFixedSize(22, 22)
+        close_btn.setToolTip("Chiudi")
+        close_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; color: #EAEAEA; "
+            "font-size: 14px; }"
+            "QPushButton:hover { background: #c02020; border-radius: 4px; }"
+        )
+        # Lambda esplicita: `clicked` emette `bool`, `closeRequested.emit()` no
+        # arg — la lambda scarta il bool per evitare mismatch di arità.
+        close_btn.clicked.connect(lambda: self.closeRequested.emit())
+        layout.addWidget(close_btn)
+
+        return bar
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -148,12 +202,6 @@ class TeamPanel(QWidget):
         self._click_through_check.setChecked(self._state.click_through)
         self._click_through_check.toggled.connect(self.clickThroughToggled.emit)
         header.addWidget(self._click_through_check)
-
-        close_btn = QPushButton("×", self)
-        close_btn.setFixedWidth(28)
-        close_btn.setToolTip("Chiudi")
-        close_btn.clicked.connect(self.closeRequested.emit)
-        header.addWidget(close_btn)
 
         return header
 
