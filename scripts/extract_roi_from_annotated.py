@@ -163,6 +163,41 @@ def _bbox_to_roi(box: PixelRect, game_area: PixelRect) -> Roi:
     )
 
 
+def _detect_game_area(arr: np.ndarray) -> PixelRect:
+    """Auto-detect del rettangolo "gioco" scansionando i bordi non-neri.
+
+    Un capture pulito da mGBA ha solo letterbox = pixel neri ai lati / sopra
+    /sotto del game area. Uno screenshot preso da browser o croppato a mano
+    può avere bordi bianchi o grigi in più. Cerchiamo le prime righe/colonne
+    contenenti pixel "colorati" (non near-black e non near-white).
+    """
+    h, w = arr.shape[:2]
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    # Pixel "gioco" = né nero (max canale > 30) né bianco (min canale < 240).
+    max_ch = np.maximum(np.maximum(r, g), b)
+    min_ch = np.minimum(np.minimum(r, g), b)
+    is_game = (max_ch > 30) & (min_ch < 240)
+
+    # Richiedi almeno il 5% dei pixel della riga/colonna come "game": una
+    # riga di bordo con 1-2 pixel grigi sparsi (JPEG artefact, watermark)
+    # non deve espandere il game area.
+    row_threshold = int(w * 0.05)
+    col_threshold = int(h * 0.05)
+    row_has_game = is_game.sum(axis=1) > row_threshold
+    col_has_game = is_game.sum(axis=0) > col_threshold
+    ys = np.where(row_has_game)[0]
+    xs = np.where(col_has_game)[0]
+    if len(ys) == 0 or len(xs) == 0:
+        # Fallback: assume tutto il frame è game area.
+        return PixelRect(x=0, y=0, w=w, h=h)
+    return PixelRect(
+        x=int(xs[0]),
+        y=int(ys[0]),
+        w=int(xs[-1] - xs[0] + 1),
+        h=int(ys[-1] - ys[0] + 1),
+    )
+
+
 def _fmt_roi(roi: Roi) -> str:
     return f"Roi(x={roi.x:.3f}, y={roi.y:.3f}, w={roi.w:.3f}, h={roi.h:.3f})"
 
@@ -183,15 +218,38 @@ def main() -> None:
         default=0,
         help="Altezza menu bar in pixel (0 se cattura client-area).",
     )
+    parser.add_argument(
+        "--auto-game-area",
+        action="store_true",
+        default=True,
+        help="Auto-detect game area dai bordi non-neri (default: True).",
+    )
+    parser.add_argument(
+        "--no-auto-game-area",
+        dest="auto_game_area",
+        action="store_false",
+        help="Disabilita auto-detect: usa compute_game_area con --menu-offset.",
+    )
     args = parser.parse_args()
 
     img = Image.open(args.path).convert("RGBA")
     arr = np.array(img)
     print(f"immagine: {img.width}x{img.height} px, menu_offset={args.menu_offset}")
 
-    layout = GameLayout(aspect_ratio=240 / 160, menu_offset_top=args.menu_offset)
-    game_area = compute_game_area(img.width, img.height, layout)
-    print(f"game area: x={game_area.x} y={game_area.y} w={game_area.w} h={game_area.h}\n")
+    if args.auto_game_area:
+        game_area = _detect_game_area(arr)
+        print(
+            f"game area (auto-detect): "
+            f"x={game_area.x} y={game_area.y} w={game_area.w} h={game_area.h} "
+            f"aspect={game_area.w / game_area.h:.3f}\n"
+        )
+    else:
+        layout = GameLayout(aspect_ratio=240 / 160, menu_offset_top=args.menu_offset)
+        game_area = compute_game_area(img.width, img.height, layout)
+        print(
+            f"game area (computed): "
+            f"x={game_area.x} y={game_area.y} w={game_area.w} h={game_area.h}\n"
+        )
 
     current: dict[str, tuple[Roi, ...]] = {
         "name": ROIS_FIRERED.team_menu.slot_areas,
