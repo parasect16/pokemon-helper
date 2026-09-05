@@ -61,3 +61,24 @@ def label_it(type_name: str) -> str:
 def color_for(type_name: str) -> str:
     """Colore HEX associato al tipo; fallback a grigio neutro se ignoto."""
     return TYPE_COLORS.get(type_name, "#888888")
+
+
+def text_color_for(bg_hex: str) -> str:
+    """Colore testo (`#000` o `#fff`) ottimale sopra un background HEX dato.
+
+    Regola: luminanza percettiva (0.299 R + 0.587 G + 0.114 B) → sotto 160
+    scegliamo bianco, sopra scegliamo nero. Serve per rendere leggibili le
+    etichette dei tipi giallo/oro/rosa (Elettro, Terra, Roccia, ecc.) che
+    con testo bianco perdono contrasto.
+    """
+    hex_clean = bg_hex.lstrip("#")
+    if len(hex_clean) != 6:
+        return "#fff"
+    try:
+        r = int(hex_clean[0:2], 16)
+        g = int(hex_clean[2:4], 16)
+        b = int(hex_clean[4:6], 16)
+    except ValueError:
+        return "#fff"
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return "#000" if luminance > 160 else "#fff"

@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.engine import EffectivenessEngine
 from pokemon_helper.ui.state import AppState
-from pokemon_helper.ui.types_meta import color_for, label_it
+from pokemon_helper.ui.types_meta import color_for, label_it, text_color_for
 
 SPRITES_ROOT = Path(__file__).resolve().parents[3] / "data" / "vendor" / "sprites"
 
@@ -201,7 +201,9 @@ class OpponentPanel(QWidget):
         eff_label = QLabel(_render_effectiveness_html(types, generation), card)
         eff_label.setTextFormat(Qt.TextFormat.RichText)
         eff_label.setWordWrap(True)
-        eff_label.setStyleSheet("font-size: 11px;")
+        # Font size intrinseco al widget: l'HTML può alzarlo ulteriormente
+        # dentro le tabelle. 12 px come baseline garantisce leggibilità.
+        eff_label.setStyleSheet("font-size: 12px;")
         layout.addWidget(eff_label)
         layout.addStretch(1)
         return card
@@ -239,60 +241,80 @@ def _separator(parent: QWidget) -> QFrame:
     return line
 
 
+def _render_type_badge(type_name: str, *, font_size_px: int = 12) -> str:
+    """Badge HTML per un tipo con testo scelto per contrasto sul bg colorato."""
+    bg = color_for(type_name)
+    fg = text_color_for(bg)
+    return (
+        f"<span style='background:{bg}; color:{fg}; padding:2px 8px; "
+        f"border-radius:6px; font-size:{font_size_px}px; font-weight:bold;'>"
+        f"{label_it(type_name)}</span>"
+    )
+
+
 def _render_type_badges(types: tuple[str, ...]) -> str:
-    badges: list[str] = []
-    for type_name in types:
-        color = color_for(type_name)
-        label = label_it(type_name)
-        badges.append(
-            f"<span style='background:{color}; color:white; padding:1px 6px; "
-            f"border-radius:6px; margin-right:2px; font-size:11px;'>{label}</span>"
-        )
-    return "".join(badges)
+    """Badge dei tipi per l'intestazione del Pokemon."""
+    return "".join(f"<span style='margin-right:3px;'>{_render_type_badge(t)}</span>" for t in types)
 
 
 def _render_effectiveness_html(defender_types: tuple[str, ...], generation: int) -> str:
-    """Efficacia difensiva raggruppata in Debolezze / Resistenze / Immunità.
+    """Efficacia difensiva a colonna: una riga per tipo (badge + moltiplicatore).
 
-    I tipi con moltiplicatore 1× vengono esclusi (nessuna informazione utile).
+    Struttura: sezioni "Debolezze" / "Resistenze" / "Immune" ognuna con una
+    `<table>` HTML che allinea il badge del tipo a sinistra e il
+    moltiplicatore a destra. Il testo del badge è nero o bianco in base alla
+    luminanza del colore di sfondo (Elettro/Terra/Roccia diventano leggibili).
+    I tipi con 1× vengono esclusi.
     """
     engine = EffectivenessEngine(generation)
     profile = engine.defensive_profile(list(defender_types))
 
-    weak_4x = sorted(t for t, m in profile.items() if m >= 4)
-    weak_2x = sorted(t for t, m in profile.items() if 1 < m < 4)
-    resist_half = sorted(t for t, m in profile.items() if 0 < m <= 0.5 and m > 0.25)
-    resist_quarter = sorted(t for t, m in profile.items() if 0 < m <= 0.25)
-    immune = sorted(t for t, m in profile.items() if m == 0)
-
-    sections: list[str] = []
+    weak = sorted(
+        ((t, m) for t, m in profile.items() if m > 1),
+        key=lambda pair: (-pair[1], pair[0]),
+    )
+    resist = sorted(
+        ((t, m) for t, m in profile.items() if 0 < m < 1),
+        key=lambda pair: (pair[1], pair[0]),
+    )
+    immune = sorted(((t, m) for t, m in profile.items() if m == 0), key=lambda p: p[0])
 
     def _render_group(label: str, entries: list[tuple[str, float]]) -> str | None:
         if not entries:
             return None
-        badges = " ".join(
-            f"<span style='background:{color_for(t)}; color:white; padding:0 4px; "
-            f"border-radius:4px; font-size:10px;'>{label_it(t)} "
-            f"{format_multiplier(m)}</span>"
-            for t, m in entries
+        rows: list[str] = []
+        for type_name, mult in entries:
+            badge = _render_type_badge(type_name)
+            mult_text = format_multiplier(mult)
+            rows.append(
+                "<tr>"
+                f"<td style='padding:2px 6px 2px 0;'>{badge}</td>"
+                "<td style='padding:2px 0; color:#EAEAEA; font-weight:bold; "
+                f"font-size:12px;'>{mult_text}</td>"
+                "</tr>"
+            )
+        table = (
+            "<table style='border-collapse:collapse; margin-left:4px;'>"
+            + "".join(rows)
+            + "</table>"
         )
-        return f"<div style='margin-top:2px;'><b>{label}</b> {badges}</div>"
+        return (
+            "<div style='margin-top:6px; color:#EAEAEA; font-weight:bold; "
+            f"font-size:12px;'>{label}</div>{table}"
+        )
 
-    weak_entries = [(t, 4.0) for t in weak_4x] + [(t, 2.0) for t in weak_2x]
-    resist_entries = [(t, 0.5) for t in resist_half] + [(t, 0.25) for t in resist_quarter]
-    immune_entries = [(t, 0.0) for t in immune]
-
+    sections: list[str] = []
     for label, entries in (
-        ("Debolezze", weak_entries),
-        ("Resistenze", resist_entries),
-        ("Immune", immune_entries),
+        ("Debolezze", weak),
+        ("Resistenze", resist),
+        ("Immune", immune),
     ):
         rendered = _render_group(label, entries)
         if rendered is not None:
             sections.append(rendered)
 
     if not sections:
-        return "<i>Nessuna interazione non-neutra</i>"
+        return "<i style='color:#aaa; font-size:11px;'>Nessuna interazione non-neutra</i>"
     return "".join(sections)
 
 
