@@ -48,6 +48,8 @@ class TeamPanel(QWidget):
     generationChanged = Signal(int)
     slotChanged = Signal(int, object)  # (index, TeamSlot | None)
     teamReplaced = Signal(object)  # nuovo team completo (list[TeamSlot | None])
+    reloadTeamRequested = Signal()  # utente ha cliccato "Ricarica squadra"
+    reloadOpponentRequested = Signal()  # utente ha cliccato "Ricarica avversario"
 
     def __init__(
         self,
@@ -110,6 +112,7 @@ class TeamPanel(QWidget):
         outer.setContentsMargins(10, 8, 10, 10)
         outer.setSpacing(6)
 
+        outer.addLayout(self._build_reload_buttons())
         outer.addLayout(self._build_header())
 
         for index in range(TEAM_SIZE):
@@ -122,6 +125,37 @@ class TeamPanel(QWidget):
         # Sezione avversario: placeholder finché F4 non imposta un ID.
         self._opponent_panel = OpponentPanel(self._repository, self._state)
         outer.addWidget(self._opponent_panel)
+
+    def _build_reload_buttons(self) -> QHBoxLayout:
+        """Riga di pulsanti di ricarica (equivalenti alle hotkey `Ctrl+Alt+T/R`)."""
+        row = QHBoxLayout()
+        row.setSpacing(4)
+
+        # Uso simboli Unicode (⟳ = clockwise arrow, ⚔ = swords) per non
+        # dipendere da asset icona esterni. Il tooltip cita la hotkey associata.
+        self._reload_team_btn = QPushButton("⟳ Squadra", self)
+        self._reload_team_btn.setToolTip("Ricarica squadra dal menu Pokemon (Ctrl+Alt+T)")
+        self._reload_team_btn.clicked.connect(lambda: self.reloadTeamRequested.emit())
+        row.addWidget(self._reload_team_btn)
+
+        self._reload_opp_btn = QPushButton("⚔ Avversario", self)
+        self._reload_opp_btn.setToolTip(
+            "Ricarica avversario dalla schermata di combattimento (Ctrl+Alt+R)"
+        )
+        self._reload_opp_btn.clicked.connect(lambda: self.reloadOpponentRequested.emit())
+        row.addWidget(self._reload_opp_btn)
+
+        row.addStretch(1)
+        return row
+
+    def set_reload_buttons_enabled(self, enabled: bool) -> None:
+        """Abilita/disabilita entrambi i pulsanti di ricarica.
+
+        Usato dall'app layer per dare feedback visivo mentre una cattura +
+        riconoscimento è in corso (~200-400 ms su thread di background).
+        """
+        self._reload_team_btn.setEnabled(enabled)
+        self._reload_opp_btn.setEnabled(enabled)
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -237,8 +238,18 @@ def _init_recognize_hotkey(
     hotkey.start()
     team_hotkey = GlobalHotkey("<ctrl>+<alt>+t", on_recognize_team)
     team_hotkey.start()
-    # Ritorniamo una tupla, ma i chiamanti attuali gestiscono un solo hotkey:
-    # per compatibilità restituiamo un oggetto composito che espone `.stop()`.
+
+    # Pulsanti UI equivalenti alle hotkey. Lanciamo il recognize su un thread
+    # daemon per non bloccare il thread GUI durante la cattura + OCR (~200-400
+    # ms). Il feedback torna in UI via i segnali del bridge, già usati dai
+    # callback delle hotkey.
+    def spawn_in_thread(func):
+        return lambda: threading.Thread(target=func, daemon=True).start()
+
+    team_panel.reloadOpponentRequested.connect(spawn_in_thread(on_recognize))
+    team_panel.reloadTeamRequested.connect(spawn_in_thread(on_recognize_team))
+
+    # Ritorniamo un aggregatore delle due hotkey per un unico `.stop()`.
     return _HotkeyGroup([hotkey, team_hotkey])
 
 
