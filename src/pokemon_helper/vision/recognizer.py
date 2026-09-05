@@ -96,12 +96,15 @@ class Recognizer:
         layout: GameLayout,
         rois: GameRois,
         generation: int,
+        *,
+        restrict_to_ids: set[int] | None = None,
     ) -> Recognition | None:
         """Riconosce il Pokemon del giocatore (back sprite + HUD basso-dx).
 
-        Stesso schema di `recognize_opponent`: usa le ROI `player_name` e
-        `player_sprite`. Il pHash cerca match sul lato `back` grazie alla
-        stessa scansione — il repository restituisce comunque per pokemon_id.
+        `restrict_to_ids`: se passato, sia il fuzzy match sul nome sia il
+        match pHash sullo sprite vengono filtrati a quel set. Utile per
+        vincolare il player attivo ai soli 6 membri della squadra, che è
+        quello che deve essere per definizione.
         """
         return self._recognize(
             frame,
@@ -109,6 +112,7 @@ class Recognizer:
             name_roi=rois.player_name,
             sprite_roi=rois.player_sprite,
             generation=generation,
+            restrict_to_ids=restrict_to_ids,
         )
 
     def recognize_team(
@@ -204,35 +208,58 @@ class Recognizer:
         name_roi,
         sprite_roi,
         generation: int,
+        restrict_to_ids: set[int] | None = None,
     ) -> Recognition | None:
-        """Nucleo condiviso: OCR nome + pHash sprite → combina."""
+        """Nucleo condiviso: OCR nome + pHash sprite → combina.
+
+        `restrict_to_ids`: filtro post-query sui candidati (nome + pHash) per
+        limitare il risultato a un insieme di specie noto (es. i 6 membri
+        della squadra corrente).
+        """
         game_area = compute_game_area(frame.width, frame.height, layout)
         name_crop = frame.crop(roi_to_pixels(name_roi, game_area).as_crop_box())
         sprite_crop = frame.crop(roi_to_pixels(sprite_roi, game_area).as_crop_box())
 
+        # Fuzzy match più permissivo quando abbiamo un restrict set: partiamo
+        # con soglia bassa e più candidati, poi filtriamo per il set.
         ocr_results = self._ocr.recognize(name_crop)
         candidate_text = _pick_name_text(ocr_results)
         name_matches: list[tuple[int, float]] = []
         if candidate_text:
+            fuzzy_limit = 20 if restrict_to_ids else 5
+            fuzzy_min = 0.35 if restrict_to_ids else 0.55
             name_matches = [
                 (pokemon.id, score)
                 for pokemon, score in self._repo.find_by_fuzzy_name(
-                    candidate_text, generation, min_similarity=0.55, limit=5
+                    candidate_text,
+                    generation,
+                    min_similarity=fuzzy_min,
+                    limit=fuzzy_limit,
                 )
+                if restrict_to_ids is None or pokemon.id in restrict_to_ids
             ]
 
+        # Con restrict_to_ids alziamo max_distance e limit per aumentare la
+        # probabilità che almeno un membro squadra sia fra i candidati.
         phash = compute_phash(sprite_crop)
+        sprite_max_distance = 40 if restrict_to_ids else 30
+        sprite_limit = 30 if restrict_to_ids else 10
         sprite_matches = self._repo.find_pokemon_by_sprite_hash(
-            phash, generation, max_distance=30, limit=10
+            phash, generation, max_distance=sprite_max_distance, limit=sprite_limit
         )
-        sprite_pairs: list[tuple[int, int]] = [(m.pokemon_id, m.distance) for m in sprite_matches]
+        sprite_pairs: list[tuple[int, int]] = [
+            (m.pokemon_id, m.distance)
+            for m in sprite_matches
+            if restrict_to_ids is None or m.pokemon_id in restrict_to_ids
+        ]
 
         debug = {
             "ocr_text": candidate_text or "",
             "phash": phash,
+            "restrict_to_ids": sorted(restrict_to_ids) if restrict_to_ids else None,
         }
 
-        return _combine(name_matches, sprite_pairs, debug)
+        return _combine(name_matches, sprite_pairs, debug, restricted=restrict_to_ids is not None)
 
 
 def _pick_name_text(ocr_results: list[OcrResult]) -> str | None:
@@ -308,19 +335,27 @@ def _combine(
     name_matches: list[tuple[int, float]],
     sprite_matches: list[tuple[int, int]],
     debug: dict,
+    *,
+    restricted: bool = False,
 ) -> Recognition | None:
     """Fonde i due elenchi in un unico verdetto con confidenza 0-1.
 
-    Politica:
-    - Se un Pokemon compare in entrambi i top-N: `source='both'`, confidenza
-      alta (base 0.7 + boost proporzionale al fuzzy score).
-    - Se solo in name_matches con score ≥ 0.75: `source='name'`, confidenza
-      pari allo score.
-    - Se solo in sprite_matches con distanza ≤ 12: `source='sprite'`,
-      confidenza `1 - distance/32` (basso per grandi distanze).
+    Politica (soglie più permissive quando `restricted=True`, perché il
+    dominio è ristretto a un piccolo set noto — tipicamente i 6 membri
+    della squadra — quindi la migliore corrispondenza è quasi per forza
+    quella giusta anche con score assoluto basso):
+
+    - Pokemon presente in entrambi i top-N → `source='both'`, alta confidenza.
+    - Solo `name_matches`, score ≥ soglia → `source='name'`.
+    - Solo `sprite_matches`, distanza ≤ soglia → `source='sprite'`.
+    - Nessuna soglia raggiunta → miglior name match con confidenza dimezzata.
     """
     name_map = dict(name_matches)
     sprite_map = dict(sprite_matches)
+
+    name_threshold = 0.55 if restricted else 0.75
+    sprite_threshold = 20 if restricted else 12
+    confidence_floor = 0.7 if restricted else 0.5
 
     # Intersezione: pokemon presenti in entrambi.
     both_ids = set(name_map) & set(sprite_map)
@@ -340,40 +375,53 @@ def _combine(
             debug=debug,
         )
 
-    # Solo nome, se abbastanza sicuro.
+    # Solo nome, se abbastanza sicuro (soglia più bassa quando ristretto).
     if name_matches:
         best_id, best_score = max(name_matches, key=lambda pair: pair[1])
-        if best_score >= 0.75:
+        if best_score >= name_threshold:
+            confidence = max(confidence_floor, best_score) if restricted else best_score
             return Recognition(
                 pokemon_id=best_id,
-                confidence=best_score,
+                confidence=confidence,
                 source="name",
                 name_score=best_score,
                 debug=debug,
             )
 
-    # Solo sprite, molto conservativo perché il pHash su cattura con
-    # background reale ha bias.
+    # Solo sprite, con soglia più permissiva se ristretto.
     if sprite_matches:
         best_id, best_distance = min(sprite_matches, key=lambda pair: pair[1])
-        if best_distance <= 12:
+        if best_distance <= sprite_threshold:
+            base_conf = max(0.0, 1.0 - best_distance / 32.0)
+            confidence = max(confidence_floor, base_conf) if restricted else base_conf
             return Recognition(
                 pokemon_id=best_id,
-                confidence=max(0.0, 1.0 - best_distance / 32.0),
+                confidence=confidence,
                 source="sprite",
                 sprite_distance=best_distance,
                 debug=debug,
             )
 
-    # Nessun candidato, ma restituiamo il migliore fuzzy match anche se sotto
-    # soglia, per dare feedback in debug (con confidenza bassa).
+    # Fallback: miglior candidato disponibile anche sotto soglia.
     if name_matches:
         best_id, best_score = max(name_matches, key=lambda pair: pair[1])
+        confidence = max(confidence_floor, best_score) if restricted else best_score * 0.5
         return Recognition(
             pokemon_id=best_id,
-            confidence=best_score * 0.5,
+            confidence=confidence,
             source="name",
             name_score=best_score,
+            debug=debug,
+        )
+    if restricted and sprite_matches:
+        # Con dominio ristretto, anche uno sprite match "distante" è probabile
+        # sia il giusto (il set contiene un solo candidato plausibile).
+        best_id, best_distance = min(sprite_matches, key=lambda pair: pair[1])
+        return Recognition(
+            pokemon_id=best_id,
+            confidence=confidence_floor,
+            source="sprite",
+            sprite_distance=best_distance,
             debug=debug,
         )
     return None

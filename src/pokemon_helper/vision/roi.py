@@ -129,11 +129,14 @@ ROIS_FIRERED = GameRois(
     # Barra HP avversario: barra colorata dopo la label "PS".
     opponent_hp_bar=Roi(x=0.146, y=0.222, w=0.250, h=0.028),
     # --- Giocatore (metà bassa) ---
-    # HUD del giocatore in basso-destra: solo la riga del nome+livello
-    # (esclude la barra HP che vive più in basso).
-    player_name=Roi(x=0.545, y=0.550, w=0.400, h=0.048),
-    # Sprite posteriore del giocatore in basso-sinistra.
-    player_sprite=Roi(x=0.100, y=0.470, w=0.290, h=0.310),
+    # HUD del giocatore in basso-destra: riga nome+livello (esclude la barra
+    # HP che vive più in basso). Posizionamento fine dopo iterazioni con la
+    # cattura live: y più alta e box alto per catturare bene il testo.
+    player_name=Roi(x=0.545, y=0.478, w=0.400, h=0.082),
+    # Sprite posteriore del giocatore in basso-sinistra: allargato verso
+    # destra rispetto alla prima calibrazione per includere la parte destra
+    # dello sprite che sporgeva oltre il ROI iniziale.
+    player_sprite=Roi(x=0.090, y=0.470, w=0.360, h=0.310),
     # Barra HP giocatore: barra colorata "PS ▬▬▬" (prima dei numeri assoluti).
     player_hp_bar=Roi(x=0.635, y=0.605, w=0.260, h=0.028),
     # --- Menu Pokemon ---

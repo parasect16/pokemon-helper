@@ -236,11 +236,21 @@ def _init_recognize_hotkey(
             frame = capture.capture_frame(timeout_seconds=3.0)
 
             # Riconosci entrambi i lati con una singola cattura, usando
-            # una connection dedicata al thread pynput.
+            # una connection dedicata al thread pynput. Il player in campo
+            # può essere solo uno dei 6 membri della squadra: restringiamo
+            # il match a quell'insieme per aumentare la precisione anche
+            # con OCR imperfetta e pHash rumoroso.
+            team_ids = {slot.pokemon_id for slot in state.team if slot is not None}
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
                 opp = recognizer.recognize_opponent(frame.image, layout, rois, state.generation)
-                player = recognizer.recognize_player(frame.image, layout, rois, state.generation)
+                player = recognizer.recognize_player(
+                    frame.image,
+                    layout,
+                    rois,
+                    state.generation,
+                    restrict_to_ids=team_ids or None,
+                )
 
             if opp is None or opp.confidence < min_confidence:
                 bridge.failed.emit(
