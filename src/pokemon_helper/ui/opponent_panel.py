@@ -1,36 +1,51 @@
 """Sezione avversario del pannello overlay.
 
-Tre stati di visualizzazione:
+Layout in due colonne quando entrambi i Pokemon sono noti:
 
-- **Nessun avversario**: placeholder "Combattimento non in corso".
-- **Avversario impostato, player attivo sconosciuto**: mostra intestazione
-  avversario + suggerimento di attivare il recognize per identificare il
-  Pokemon del giocatore in campo.
-- **Avversario + player attivo entrambi impostati**: mostra una riga
-  singola con nome/tipi del player in campo e i moltiplicatori difesa
-  (max STAB nemico in ingresso) e offesa (max STAB proprio in uscita).
+    ┌─────────────────┬─────────────────┐
+    │ [icona player]  │ [icona opp]     │
+    │ Nome            │ Nome            │
+    │ [type badges]   │ [type badges]   │
+    │ Debolezze:      │ Debolezze:      │
+    │  ...            │  ...            │
+    │ Resistenze:     │ Resistenze:     │
+    │  ...            │  ...            │
+    │ Immunità:       │ Immunità:       │
+    │  ...            │  ...            │
+    └─────────────────┴─────────────────┘
 
-I dati coprono solo i due Pokemon **effettivamente in scontro** (avversario
-+ player attivo). La logica dei moltiplicatori vive in
-`pokemon_helper.engine.matchup`; qui resta solo formattazione e rendering.
+Ogni colonna copre un Pokemon con: icona sprite front dal Pokedex, nome,
+tipi e la lista di efficacia difensiva (per ciascun tipo di attaccante, il
+moltiplicatore ricevuto — vengono esclusi i valori neutri 1×).
+
+Placeholder alternativi:
+
+- Nessun avversario: "Combattimento non in corso".
+- Avversario impostato ma player attivo sconosciuto: suggerimento a fare
+  un recognize battaglia via `Ctrl+Alt+R` / pulsante "⚔ Avversario".
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from pokemon_helper.data import PokemonRepository
-from pokemon_helper.engine import EffectivenessEngine, compute_matchup
+from pokemon_helper.engine import EffectivenessEngine
 from pokemon_helper.ui.state import AppState
 from pokemon_helper.ui.types_meta import color_for, label_it
+
+SPRITES_ROOT = Path(__file__).resolve().parents[3] / "data" / "vendor" / "sprites"
 
 
 def format_multiplier(value: float) -> str:
@@ -50,38 +65,8 @@ def format_multiplier(value: float) -> str:
     return f"{value:g}×"
 
 
-def defense_color(multiplier: float) -> str:
-    """Colore per un valore di difesa (alto = pericolo, rosso)."""
-    if multiplier == 0:
-        return "#3f5f3f"  # immune: verde scuro (ottimo)
-    if multiplier >= 4:
-        return "#c02020"
-    if multiplier >= 2:
-        return "#e08040"
-    if multiplier <= 0.25:
-        return "#20a020"
-    if multiplier <= 0.5:
-        return "#60c060"
-    return "#606078"
-
-
-def offense_color(multiplier: float) -> str:
-    """Colore per un valore di offesa (alto = vantaggio, verde)."""
-    if multiplier == 0:
-        return "#5a2828"  # immunità nemica: colpo inutile
-    if multiplier >= 4:
-        return "#20a020"
-    if multiplier >= 2:
-        return "#60c060"
-    if multiplier <= 0.25:
-        return "#c02020"
-    if multiplier <= 0.5:
-        return "#e08040"
-    return "#606078"
-
-
 class OpponentPanel(QWidget):
-    """Pannello con placeholder + eventuale tabella debolezze/coperture."""
+    """Sezione con placeholder + eventualmente due card (player + avversario)."""
 
     def __init__(self, repository: PokemonRepository, state: AppState) -> None:
         super().__init__()
@@ -91,7 +76,6 @@ class OpponentPanel(QWidget):
         self._active_player_id: int | None = None
         self._content: QWidget | None = None
 
-        # Layout esterno: il contenuto interno è rigenerato ad ogni refresh().
         self._outer = QVBoxLayout(self)
         self._outer.setContentsMargins(0, 6, 0, 0)
         self._outer.setSpacing(0)
@@ -101,47 +85,42 @@ class OpponentPanel(QWidget):
     # -------------------------------------------------------- public API
 
     def set_opponent(self, pokemon_id: int | None) -> None:
-        """Imposta l'avversario corrente."""
         if self._opponent_id == pokemon_id:
             return
         self._opponent_id = pokemon_id
         self._refresh()
 
     def set_active_player(self, pokemon_id: int | None) -> None:
-        """Imposta il Pokemon del giocatore attualmente in campo.
-
-        Il matchup viene sempre calcolato per la coppia
-        (avversario, player attivo). Se uno dei due manca, il pannello
-        mostra un placeholder informativo invece della tabella.
-        """
         if self._active_player_id == pokemon_id:
             return
         self._active_player_id = pokemon_id
         self._refresh()
 
     def apply_state(self, state: AppState) -> None:
-        """Sincronizza con nuovo stato (squadra o generazione cambiati)."""
         self._state = state
         self._refresh()
 
     # ----------------------------------------------------------- rendering
 
     def _refresh(self) -> None:
-        """Ricostruisce il contenuto interno da zero."""
         if self._content is not None:
             self._outer.removeWidget(self._content)
             self._content.deleteLater()
             self._content = None
 
         if self._opponent_id is None:
-            self._content = self._build_placeholder()
+            self._content = self._build_placeholder("Combattimento non in corso")
+        elif self._active_player_id is None:
+            self._content = self._build_placeholder(
+                "Player in campo sconosciuto — usa Ctrl+Alt+R o ⚔ Avversario"
+            )
         else:
-            self._content = self._build_battle() or self._build_placeholder()
-
+            self._content = self._build_battle() or self._build_placeholder(
+                "Dati incompleti per il match"
+            )
         self._outer.addWidget(self._content)
 
-    def _build_placeholder(self) -> QWidget:
-        """Riquadro con separatore + messaggio 'combattimento non in corso'."""
+    def _build_placeholder(self, message: str) -> QWidget:
         widget = QWidget(self)
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -149,26 +128,25 @@ class OpponentPanel(QWidget):
 
         layout.addWidget(_separator(widget))
 
-        label = QLabel("Combattimento non in corso", widget)
+        label = QLabel(message, widget)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
         label.setStyleSheet("color: #7a7a8a; font-style: italic; padding: 6px;")
         layout.addWidget(label)
         return widget
 
     def _build_battle(self) -> QWidget | None:
-        """Riquadro con lo scontro corrente: solo player attivo vs avversario.
-
-        Ritorna `None` se i dati per costruirlo sono incompleti (avversario
-        sconosciuto o senza tipi nella generazione). Se manca il player attivo
-        mostra un messaggio informativo al posto della tabella.
-        """
-        if self._opponent_id is None:
-            return None
+        """Costruisce le due card (player + avversario) affiancate."""
+        assert self._opponent_id is not None
+        assert self._active_player_id is not None
+        player = self._repo.get_by_id(self._active_player_id)
         opponent = self._repo.get_by_id(self._opponent_id)
-        if opponent is None:
+        if player is None or opponent is None:
             return None
-        opp_types = self._repo.get_types(opponent.id, self._state.generation)
-        if not opp_types:
+        gen = self._state.generation
+        player_types = self._repo.get_types(player.id, gen)
+        opp_types = self._repo.get_types(opponent.id, gen)
+        if not player_types or not opp_types:
             return None
 
         widget = QWidget(self)
@@ -177,88 +155,75 @@ class OpponentPanel(QWidget):
         layout.setSpacing(4)
 
         layout.addWidget(_separator(widget))
-        layout.addLayout(self._build_opponent_header(widget, opponent, opp_types))
-        layout.addWidget(self._build_matchup_row(widget, opp_types))
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(self._build_pokemon_card(widget, player, player_types, gen))
+        row.addWidget(self._build_pokemon_card(widget, opponent, opp_types, gen))
+        layout.addLayout(row)
         return widget
 
-    def _build_opponent_header(self, parent: QWidget, opponent, opp_types) -> QHBoxLayout:
-        header = QHBoxLayout()
-        name_label = QLabel(f"Avversario: <b>{opponent.name_it or opponent.name_en}</b>", parent)
-        name_label.setTextFormat(Qt.TextFormat.RichText)
-        header.addWidget(name_label)
-        header.addStretch(1)
+    def _build_pokemon_card(
+        self, parent: QWidget, pokemon, types: tuple[str, ...], generation: int
+    ) -> QWidget:
+        card = QFrame(parent)
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        card.setStyleSheet("QFrame { background-color: rgba(255,255,255,15); border-radius: 6px; }")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        types_label = QLabel(_render_type_badges(opp_types), parent)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+        icon_label = QLabel(card)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setFixedHeight(96)
+        pixmap = self._load_sprite_pixmap(pokemon.id, generation)
+        if pixmap is not None:
+            icon_label.setPixmap(pixmap)
+        else:
+            icon_label.setText("(sprite mancante)")
+            icon_label.setStyleSheet("color: #7a7a8a; font-style: italic;")
+        layout.addWidget(icon_label)
+
+        name_label = QLabel(pokemon.name_it or pokemon.name_en, card)
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_font = name_label.font()
+        name_font.setBold(True)
+        name_label.setFont(name_font)
+        layout.addWidget(name_label)
+
+        types_label = QLabel(_render_type_badges(types), card)
         types_label.setTextFormat(Qt.TextFormat.RichText)
-        header.addWidget(types_label)
-        return header
+        types_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(types_label)
 
-    def _build_matchup_row(self, parent: QWidget, opp_types: tuple[str, ...]) -> QWidget:
-        """Riga singola con difesa/offesa del player attivo vs avversario.
+        eff_label = QLabel(_render_effectiveness_html(types, generation), card)
+        eff_label.setTextFormat(Qt.TextFormat.RichText)
+        eff_label.setWordWrap(True)
+        eff_label.setStyleSheet("font-size: 11px;")
+        layout.addWidget(eff_label)
+        layout.addStretch(1)
+        return card
 
-        Se il player attivo non è impostato (nessun recognize battaglia
-        eseguito), mostra un messaggio informativo invece della riga.
-        """
-        container = QWidget(parent)
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 4, 0, 0)
-        container_layout.setSpacing(2)
-
-        if self._active_player_id is None:
-            hint = QLabel(
-                "Player in campo sconosciuto — usa Ctrl+Alt+R o ⚔ Avversario "
-                "in combattimento per rilevarlo",
-                container,
-            )
-            hint.setWordWrap(True)
-            hint.setStyleSheet("color: #7a7a8a; font-style: italic; padding: 4px;")
-            container_layout.addWidget(hint)
-            return container
-
-        player_pokemon = self._repo.get_by_id(self._active_player_id)
-        if player_pokemon is None:
-            hint = QLabel(f"Player id={self._active_player_id} non nel dataset", container)
-            hint.setStyleSheet("color: #7a7a8a; font-style: italic; padding: 4px;")
-            container_layout.addWidget(hint)
-            return container
-
-        player_types = self._repo.get_types(player_pokemon.id, self._state.generation)
-        if not player_types:
-            hint = QLabel(
-                f"{player_pokemon.name_it or player_pokemon.name_en}: nessun tipo "
-                f"per Gen {self._state.generation}",
-                container,
-            )
-            hint.setStyleSheet("color: #7a7a8a; font-style: italic; padding: 4px;")
-            container_layout.addWidget(hint)
-            return container
-
-        engine = EffectivenessEngine(self._state.generation)
-        defense, offense = compute_matchup(engine, opp_types, player_types)
-
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(2)
-
-        header_style = "color: #aaaabb; font-size: 10px;"
-        for col, text in enumerate(("In campo", "Dif.", "Off.")):
-            lbl = QLabel(text, container)
-            lbl.setStyleSheet(header_style)
-            grid.addWidget(lbl, 0, col)
-
-        name = player_pokemon.name_it or player_pokemon.name_en
-        name_lbl = QLabel(name, container)
-        name_lbl.setTextFormat(Qt.TextFormat.RichText)
-        name_lbl.setText(f"<b>{name}</b> {_render_type_badges(player_types)}")
-        def_lbl = _multiplier_badge(defense, defense_color, container)
-        off_lbl = _multiplier_badge(offense, offense_color, container)
-
-        grid.addWidget(name_lbl, 1, 0)
-        grid.addWidget(def_lbl, 1, 1)
-        grid.addWidget(off_lbl, 1, 2)
-
-        container_layout.addLayout(grid)
-        return container
+    def _load_sprite_pixmap(self, pokemon_id: int, generation: int) -> QPixmap | None:
+        """Carica lo sprite front come `QPixmap`, se disponibile su disco."""
+        # Prima prova con il gioco tipico della gen (FRLG per Gen 3), altrimenti
+        # ripiega sul primo path indicizzato.
+        preferred_game = _preferred_game(generation)
+        source = self._repo.get_sprite_source_path(
+            pokemon_id, generation, side="front", preferred_game=preferred_game
+        )
+        if source is None:
+            return None
+        path = SPRITES_ROOT / source
+        if not path.exists():
+            return None
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return None
+        # Scala mantenendo aspect, sprite Pokemon sono piccoli (~64-96 px).
+        return pixmap.scaledToHeight(96, Qt.TransformationMode.SmoothTransformation)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +232,6 @@ class OpponentPanel(QWidget):
 
 
 def _separator(parent: QWidget) -> QFrame:
-    """Linea di separazione sottile fra sezioni del pannello."""
     line = QFrame(parent)
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFixedHeight(1)
@@ -275,25 +239,69 @@ def _separator(parent: QWidget) -> QFrame:
     return line
 
 
-def _multiplier_badge(value: float, color_fn, parent: QWidget) -> QLabel:
-    """Label con background colorato in base al valore del moltiplicatore."""
-    lbl = QLabel(format_multiplier(value), parent)
-    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    lbl.setStyleSheet(
-        f"color: white; background: {color_fn(value)}; "
-        "padding: 1px 6px; border-radius: 4px; min-width: 32px;"
-    )
-    return lbl
-
-
 def _render_type_badges(types: tuple[str, ...]) -> str:
-    """Badge HTML colorati per una tupla di tipi."""
     badges: list[str] = []
     for type_name in types:
         color = color_for(type_name)
         label = label_it(type_name)
         badges.append(
             f"<span style='background:{color}; color:white; padding:1px 6px; "
-            f"border-radius:6px; margin-left:2px; font-size:11px;'>{label}</span>"
+            f"border-radius:6px; margin-right:2px; font-size:11px;'>{label}</span>"
         )
     return "".join(badges)
+
+
+def _render_effectiveness_html(defender_types: tuple[str, ...], generation: int) -> str:
+    """Efficacia difensiva raggruppata in Debolezze / Resistenze / Immunità.
+
+    I tipi con moltiplicatore 1× vengono esclusi (nessuna informazione utile).
+    """
+    engine = EffectivenessEngine(generation)
+    profile = engine.defensive_profile(list(defender_types))
+
+    weak_4x = sorted(t for t, m in profile.items() if m >= 4)
+    weak_2x = sorted(t for t, m in profile.items() if 1 < m < 4)
+    resist_half = sorted(t for t, m in profile.items() if 0 < m <= 0.5 and m > 0.25)
+    resist_quarter = sorted(t for t, m in profile.items() if 0 < m <= 0.25)
+    immune = sorted(t for t, m in profile.items() if m == 0)
+
+    sections: list[str] = []
+
+    def _render_group(label: str, entries: list[tuple[str, float]]) -> str | None:
+        if not entries:
+            return None
+        badges = " ".join(
+            f"<span style='background:{color_for(t)}; color:white; padding:0 4px; "
+            f"border-radius:4px; font-size:10px;'>{label_it(t)} "
+            f"{format_multiplier(m)}</span>"
+            for t, m in entries
+        )
+        return f"<div style='margin-top:2px;'><b>{label}</b> {badges}</div>"
+
+    weak_entries = [(t, 4.0) for t in weak_4x] + [(t, 2.0) for t in weak_2x]
+    resist_entries = [(t, 0.5) for t in resist_half] + [(t, 0.25) for t in resist_quarter]
+    immune_entries = [(t, 0.0) for t in immune]
+
+    for label, entries in (
+        ("Debolezze", weak_entries),
+        ("Resistenze", resist_entries),
+        ("Immune", immune_entries),
+    ):
+        rendered = _render_group(label, entries)
+        if rendered is not None:
+            sections.append(rendered)
+
+    if not sections:
+        return "<i>Nessuna interazione non-neutra</i>"
+    return "".join(sections)
+
+
+def _preferred_game(generation: int) -> str | None:
+    """Gioco preferito per lo sprite front di una generazione (best-effort)."""
+    return {
+        1: "red-blue",
+        2: "crystal",
+        3: "firered-leafgreen",
+        4: "heartgold-soulsilver",
+        5: "black-white",
+    }.get(generation)

@@ -152,6 +152,38 @@ class PokemonRepository:
         scored.sort(key=lambda item: (-item[1], item[0].id))
         return scored[:limit]
 
+    def get_sprite_source_path(
+        self,
+        pokemon_id: int,
+        generation: int,
+        *,
+        side: str = "front",
+        preferred_game: str | None = None,
+    ) -> str | None:
+        """Restituisce il path relativo (dentro `data/vendor/sprites/`) di uno
+        sprite indicizzato, o `None` se il DB non ne ha nessuno per quella
+        combinazione.
+
+        Preferisce `preferred_game` se passato; altrimenti restituisce il
+        primo match qualsiasi per (pokemon, generazione, side).
+        """
+        if preferred_game is not None:
+            row = self._conn.execute(
+                "SELECT source_path FROM sprite_hashes "
+                "WHERE pokemon_id = ? AND generation = ? AND side = ? AND game = ? "
+                "LIMIT 1",
+                (pokemon_id, generation, side, preferred_game),
+            ).fetchone()
+            if row is not None:
+                return str(row["source_path"])
+        row = self._conn.execute(
+            "SELECT source_path FROM sprite_hashes "
+            "WHERE pokemon_id = ? AND generation = ? AND side = ? "
+            "LIMIT 1",
+            (pokemon_id, generation, side),
+        ).fetchone()
+        return str(row["source_path"]) if row is not None else None
+
     def find_pokemon_by_sprite_hash(
         self,
         query_phash: str,
