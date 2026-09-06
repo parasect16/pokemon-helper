@@ -521,7 +521,9 @@ def _init_recognize_hotkey(
     team_panel.autoDetectToggled.connect(on_auto_detect)
     poller.set_enabled(state.auto_detect)
 
-    return _HotkeyGroup([hotkey, team_hotkey, poller, worker])
+    # `capture` tiene aperta una sessione di Windows Graphics Capture: va
+    # chiusa all'uscita, o il bordo attorno alla finestra resta disegnato.
+    return _HotkeyGroup([hotkey, team_hotkey, poller, worker, capture])
 
 
 class _HotkeyGroup:
