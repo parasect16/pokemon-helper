@@ -13,7 +13,7 @@ Tool desktop Windows. Affianca emulatore Pokemon Gen 1-5 con pannello sempre in 
 - **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR nome per ciascuno dei 6 slot con fuzzy match, livello letto cifra per cifra da `vision/level_reader.py`, sovrascrive `state.team`. Guard doppia: <3/6 slot leggibili o stesso pokemon_id in ≥2 slot → aggiornamento bloccato.
 - **Mappa nickname** (pulsante `🏷`): dialog per associare nickname custom (es. "FIAMMETTA") a un pokemon_id, usata sia dal riconoscimento squadra sia da quello del player in battaglia. Il nickname si scrive come appare nel gioco: il confronto è fuzzy e assorbe gli errori OCR. Persistita in `state.json`.
 - **OpponentPanel**: due card affiancate (player | avversario) con sprite Pokedex, nome, tipi, tabella efficacia difensiva colorata (Debolezze / Resistenze / Immune, neutri esclusi).
-- **Auto-detect** (checkbox `Auto`, spento di default, persistito): polla la finestra dell'emulatore ogni 1500 ms e aggiorna il pannello da solo all'inizio del combattimento, alla fine e a ogni cambio di Pokemon in campo (entrambi i lati). L'elenco Pokemon aperto a metà lotta non conta come "combattimento finito".
+- **Auto-detect** (checkbox `Auto`, spento di default, persistito): polla la finestra dell'emulatore ogni 750 ms e aggiorna il pannello da solo all'inizio del combattimento, alla fine e a ogni cambio di Pokemon in campo (entrambi i lati). L'elenco Pokemon aperto a metà lotta non conta come "combattimento finito".
 - **Hotkey globale** (`Ctrl+Alt+P`): mostra / minimizza finestra.
 - **Feedback pulsanti**: ✓ verde su successo 10 s, ⚠ giallo su fallimento (motivo in tooltip).
 
@@ -92,7 +92,7 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 | F1   | ✅ done | `EffectivenessEngine`, `compute_matchup`, 100% test. |
 | F2   | ✅ done | Companion window nativa con chrome Windows, hotkey, persistenza. |
 | F3   | ✅ usable | mGBA + Rosso Fuoco. 19 sotto-step in `PLAN.md` §6. Su cattura live: 6/6 nomi e 6/6 livelli dal menu squadra, avversario e player riconosciuti in battaglia. |
-| F4   | ✅ done | Auto-detect via `BattleWatcher` + poll 1500 ms. Interruttore "Auto", spento di default. Segue ingresso, uscita e cambi di Pokemon su entrambi i lati. |
+| F4   | ✅ done | Auto-detect via `BattleWatcher` + poll 750 ms. Interruttore "Auto", spento di default. Segue ingresso, uscita e cambi di Pokemon su entrambi i lati. |
 
 ## 6. Limitazioni note (da PLAN §7)
 

@@ -153,7 +153,7 @@ Il pannello si aggiorna da solo, senza premere hotkey. `vision/battle_watcher.py
 
 Sotto-fasi:
 
-- **F4.1 (fatto)** — Polling periodico ogni 1500 ms. Il `QTimer` vive sul thread GUI ma non cattura: accoda un job al `_RecognizeWorker` esistente, perché `windows-capture` va usata sempre dallo stesso thread con l'apartment COM inizializzato. Effetto collaterale utile: i poll si serializzano con i riconoscimenti manuali, quindi due catture non si sovrappongono. Un poll più lento dell'intervallo salta il tick successivo invece di accumulare coda.
+- **F4.1 (fatto)** — Polling periodico ogni 750 ms. Il `QTimer` vive sul thread GUI ma non cattura: accoda un job al `_RecognizeWorker` esistente, perché `windows-capture` va usata sempre dallo stesso thread con l'apartment COM inizializzato. Effetto collaterale utile: i poll si serializzano con i riconoscimenti manuali, quindi due catture non si sovrappongono. Un poll più lento dell'intervallo salta il tick successivo invece di accumulare coda.
 - **F4.2 (fatto)** — `ENTERED` e `COMBATANTS_CHANGED` invocano `on_recognize`. L'isteresi a 2 osservazioni concordi evita i rimbalzi sulle dissolvenze e dà tempo agli sprite di finire di comparire prima che parta l'OCR.
 - **F4.3 (fatto)** — `LEFT` svuota il pannello e toglie l'evidenziazione dello slot attivo.
 - **F4.4 (fatto)** — Interruttore "Auto" in toolbar, spento di default e persistito in `state.json`. Mentre è attivo l'app cattura la finestra dell'emulatore, e quella resta una scelta dell'utente. Riattivandolo a lotta in corso il watcher si resetta, così viene comunque emesso `ENTERED`.

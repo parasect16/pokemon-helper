@@ -101,12 +101,14 @@ class _RecognizeWorker:
                 print(f"[recognize-worker] eccezione: {exc}")
 
 
-# Intervallo fra due poll dell'auto-detect. Ogni poll apre e chiude una
-# sessione di Windows Graphics Capture, e il sistema disegna un bordo attorno
-# alla finestra catturata: a 500 ms lampeggiava due volte al secondo, cosa che
-# dà fastidio mentre si gioca. A 1500 ms il combattimento viene rilevato entro
-# ~3 s (due osservazioni concordi) e il bordo si fa molto più discreto.
-POLL_INTERVAL_MS = 1500
+# Intervallo fra due poll dell'auto-detect. Con due osservazioni concordi
+# richieste, il combattimento viene rilevato entro ~1.5 s.
+#
+# Era stato alzato a 1500 ms quando ogni poll apriva e chiudeva una sessione
+# di cattura e il bordo disegnato da Windows lampeggiava di conseguenza. Con
+# la sessione persistente il bordo è fisso e un poll costa ~45 ms, cioè il 6%
+# del tempo: la ragione per tenerlo lento è venuta meno.
+POLL_INTERVAL_MS = 750
 
 
 class _BattlePoller:
