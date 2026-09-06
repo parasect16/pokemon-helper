@@ -12,7 +12,7 @@ Emette:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QMoveEvent
 from PySide6.QtWidgets import QMainWindow, QWidget
 
@@ -36,6 +36,26 @@ class CompanionWindow(QMainWindow):
     def move_to(self, x: int, y: int) -> None:
         """Sposta la finestra a coordinate assolute dello schermo."""
         self.move(x, y)
+
+    def fit_height(self) -> None:
+        """Riporta l'altezza a quella richiesta dal contenuto, larghezza invariata.
+
+        Qt allarga la finestra quando il contenuto cresce (le card avversario
+        che compaiono a inizio combattimento) ma non la restringe quando il
+        contenuto torna piccolo. Senza questo, uscendo dal combattimento resta
+        una finestra alta e mezza vuota.
+
+        Il ridimensionamento è differito di un giro di event loop: chiamato
+        subito dopo il cambio di contenuto leggerebbe un `sizeHint` calcolato
+        sul layout non ancora aggiornato.
+        """
+        QTimer.singleShot(0, self._apply_fit_height)
+
+    def _apply_fit_height(self) -> None:
+        content = self.centralWidget()
+        if content is not None:
+            content.updateGeometry()
+        self.resize(self.width(), self.sizeHint().height())
 
     def toggle_visibility(self) -> None:
         """Alterna la visibilità della finestra (nasconde o mostra ripristinando).

@@ -11,13 +11,16 @@ import pytest
 from pokemon_helper.vision.battle_watcher import (
     BattleEvent,
     BattleWatcher,
-    signature_differs,
+    signatures_differ,
 )
 
-# Firme a 16 cifre esadecimali, come i pHash a 64 bit prodotti da `compute_phash`.
-SIG_A = "ffffffffffffffff"
-SIG_A_NOISY = "ffffffffffffff00"  # 8 bit di differenza: stesso Pokemon
-SIG_B = "0000000000000000"  # 64 bit di differenza: altro Pokemon
+# Firme come le produce il probe: (testo nome avversario, testo nome player).
+SIG_A = ("HEEZINGL.33", "FIAHHETTA L.38")
+# Stessa scena riletta: l'OCR sbaglia un carattere perché il frame trasla di
+# un paio di pixel fra una cattura e l'altra. Similarità 0.93, non è un cambio.
+SIG_A_NOISY = ("HEEZINGL.33", "FIAMHETTA L.38")
+# Avversario diverso: similarità 0.40 sul primo lato.
+SIG_B = ("GLOOHL.37", "FIAHHETTA L.38")
 
 
 def _feed(watcher: BattleWatcher, count: int, in_battle: bool, signature: str | None = None):
@@ -62,21 +65,35 @@ def test_alternating_observations_never_settle() -> None:
     assert watcher.in_battle is False
 
 
-def test_opponent_change_is_detected_mid_battle() -> None:
+def test_combatant_change_is_detected_mid_battle() -> None:
     watcher = BattleWatcher(confirmations=2)
     _feed(watcher, 2, True, SIG_A)
-    assert watcher.observe(True, SIG_B) is BattleEvent.OPPONENT_CHANGED
+    assert watcher.observe(True, SIG_B) is BattleEvent.COMBATANTS_CHANGED
 
 
-def test_opponent_change_is_reported_once_per_change() -> None:
+def test_combatant_change_is_reported_once_per_change() -> None:
     watcher = BattleWatcher(confirmations=2)
     _feed(watcher, 2, True, SIG_A)
     watcher.observe(True, SIG_B)
     assert _feed(watcher, 2, True, SIG_B) == [None, None]
 
 
-def test_signature_noise_is_not_a_change() -> None:
-    """Sullo stesso nome la firma oscilla per l'anti-aliasing della scala."""
+def test_change_on_the_player_side_only_is_detected() -> None:
+    """Il caso che conta: cambia solo il Pokemon del giocatore.
+
+    È l'unico segnale disponibile, perché la barra HP avversaria resta
+    visibile per tutto il cambio e lo stato di battaglia non si muove. I due
+    lati sono confrontati separatamente proprio per questo: in un'unica
+    stringa il lato rimasto uguale diluirebbe la differenza dell'altro.
+    """
+    watcher = BattleWatcher(confirmations=2)
+    _feed(watcher, 2, True, SIG_A)
+    changed = (SIG_A[0], "ELECTRODE L.39")
+    assert watcher.observe(True, changed) is BattleEvent.COMBATANTS_CHANGED
+
+
+def test_ocr_noise_is_not_a_change() -> None:
+    """Un carattere sbagliato dall'OCR non deve far ripartire il riconoscimento."""
     watcher = BattleWatcher(confirmations=2)
     _feed(watcher, 2, True, SIG_A)
     assert watcher.observe(True, SIG_A_NOISY) is None
@@ -94,11 +111,11 @@ def test_first_signature_of_a_battle_is_adopted_silently() -> None:
     watcher = BattleWatcher(confirmations=1)
     assert watcher.observe(True, None) is BattleEvent.ENTERED
     assert watcher.observe(True, SIG_A) is None
-    assert watcher.observe(True, SIG_B) is BattleEvent.OPPONENT_CHANGED
+    assert watcher.observe(True, SIG_B) is BattleEvent.COMBATANTS_CHANGED
 
 
 def test_signature_is_forgotten_on_leaving() -> None:
-    """Battaglia nuova con lo stesso avversario: ENTERED, non OPPONENT_CHANGED."""
+    """Battaglia nuova con lo stesso avversario: ENTERED, non COMBATANTS_CHANGED."""
     watcher = BattleWatcher(confirmations=1)
     watcher.observe(True, SIG_A)
     watcher.observe(False)
@@ -133,14 +150,23 @@ def test_single_confirmation_reacts_immediately() -> None:
 
 
 @pytest.mark.parametrize(
-    ("left", "right", "max_distance", "expected"),
+    ("left", "right", "min_similarity", "expected"),
     [
-        (SIG_A, SIG_A, 12, False),
-        (SIG_A, SIG_A_NOISY, 12, False),  # 8 bit
-        (SIG_A, SIG_A_NOISY, 4, True),  # stessa coppia, soglia più stretta
-        (SIG_A, SIG_B, 12, True),  # 64 bit
-        ("ff", "ffff", 12, True),  # lunghezze diverse: incomparabili
+        (SIG_A, SIG_A, 0.75, False),
+        (SIG_A, SIG_A_NOISY, 0.75, False),  # rumore OCR: 0.93
+        (SIG_A, SIG_A_NOISY, 0.99, True),  # stessa coppia, soglia irrealistica
+        (SIG_A, SIG_B, 0.75, True),  # avversario diverso: 0.40
+        (SIG_A, ("HEEZINGL.33",), 0.75, True),  # lunghezze diverse: incomparabili
+        (SIG_A, ("", SIG_A[1]), 0.75, False),  # lettura mancante: non prova nulla
+        (("", ""), SIG_A, 0.75, False),
     ],
 )
-def test_signature_distance(left: str, right: str, max_distance: int, expected: bool) -> None:
-    assert signature_differs(left, right, max_distance) is expected
+def test_signature_comparison(left, right, min_similarity: float, expected: bool) -> None:
+    assert signatures_differ(left, right, min_similarity) is expected
+
+
+def test_a_level_up_is_not_a_change() -> None:
+    """Stesso Pokemon che sale di livello: nessun motivo di rifare il match."""
+    watcher = BattleWatcher(confirmations=1)
+    watcher.observe(True, ("HEEZINGL.33", "DUGTRIO L.38"))
+    assert watcher.observe(True, ("HEEZINGL.33", "DUGTRIO L.39")) is None

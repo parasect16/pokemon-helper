@@ -53,6 +53,7 @@ class TeamPanel(QWidget):
     reloadOpponentRequested = Signal()  # utente ha cliccato "Ricarica avversario"
     nicknamesRequested = Signal()  # utente ha cliccato "Nickname"
     autoDetectToggled = Signal(bool)  # utente ha cambiato l'interruttore auto-detect
+    contentResized = Signal()  # il contenuto ha cambiato ingombro verticale
 
     def __init__(
         self,
@@ -125,9 +126,16 @@ class TeamPanel(QWidget):
             self._slots.append(slot)
             outer.addWidget(slot)
 
-        # Sezione avversario: placeholder finché F4 non imposta un ID.
+        # Sezione avversario: placeholder finché non c'è un combattimento.
         self._opponent_panel = OpponentPanel(self._repository, self._state)
         outer.addWidget(self._opponent_panel)
+
+        # Senza questo, lo spazio verticale in eccesso viene spartito fra i sei
+        # slot: uscendo dal combattimento le card avversario spariscono, la
+        # finestra resta alta e le righe della squadra si allargano a fisarmonica.
+        # Con lo stretch l'eccesso si raccoglie in fondo e le righe restano
+        # della loro altezza naturale.
+        outer.addStretch(1)
 
     _RELOAD_TEAM_LABEL = "⟳ Squadra"
     _RELOAD_OPP_LABEL = "⚔ Avversario"
@@ -299,9 +307,15 @@ class TeamPanel(QWidget):
             self.set_active_player(self._active_player_id)
 
     def set_opponent(self, pokemon_id: int | None) -> None:
-        """API pubblica per impostare l'avversario (chiamata da F4 in futuro)."""
+        """Imposta l'avversario mostrato, o lo rimuove con `None`.
+
+        Le card avversario compaiono e spariscono, cambiando l'ingombro
+        verticale del pannello: `contentResized` lascia alla finestra il
+        compito di riadattarsi.
+        """
         if self._opponent_panel is not None:
             self._opponent_panel.set_opponent(pokemon_id)
+            self.contentResized.emit()
 
     def replace_team(self, new_team: list[TeamSlot | None]) -> None:
         """Rimpiazza il team con la lista fornita (esattamente `TEAM_SIZE` slot).

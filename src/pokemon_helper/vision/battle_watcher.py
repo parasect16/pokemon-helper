@@ -4,10 +4,16 @@
 un frame e l'altro per riconoscere le *transizioni*, che sono ciò che
 interessa a chi deve aggiornare il pannello:
 
-- si entra in combattimento → riconoscere l'avversario;
+- si entra in combattimento → riconoscere chi è in campo;
 - si esce → svuotare il pannello;
-- l'avversario cambia a metà lotta (l'allenatore ne manda in campo un altro)
-  → riconoscere di nuovo.
+- cambia un Pokemon a metà lotta, da una parte o dall'altra → riconoscere di
+  nuovo.
+
+Il cambio dell'avversario si vedrebbe anche senza firma: durante l'animazione
+il suo HUD sparisce, quindi arrivano un LEFT e un ENTERED. Il cambio del
+*giocatore* no: la barra HP avversaria resta visibile per tutto il tempo,
+nessuna transizione, e il pannello continuerebbe a mostrare il Pokemon
+precedente. Per questo la firma copre entrambi i riquadri nome.
 
 Due accortezze rendono il tutto usabile su frame reali:
 
@@ -18,18 +24,31 @@ idea. A 500 ms di intervallo, il default di 2 costa un secondo di ritardo
 sull'ingresso in battaglia — utile comunque, perché dà tempo agli sprite di
 finire di comparire prima che parta il riconoscimento.
 
-**Firma tollerante.** Il cambio di avversario si rileva confrontando una
-firma (il pHash della ROI del nome) fra un poll e l'altro. Il confronto è a
-distanza di Hamming e non per uguaglianza: sullo stesso Pokemon la firma
-oscilla di qualche bit per via dell'anti-aliasing della scala non intera.
+**Firma testuale, non pittorica.** La prima versione confrontava il pHash dei
+riquadri nome e produceva falsi positivi in continuazione: fra una cattura e
+l'altra il contenuto del frame trasla di un paio di pixel, e il pHash è
+insensibile alla scala ma non alla traslazione, quindi oscillava fra due
+valori ogni pochi secondi a gioco fermo. La firma è invece il testo letto
+dall'OCR, confrontato per similarità: lo stesso nome letto due volte dà
+0.91-0.96 anche quando l'OCR sbaglia un carattere (`FIAMHETTA` contro
+`FIAHHETTA`), mentre due Pokemon diversi stanno sotto 0.46. La soglia a 0.75
+sta nel mezzo con margine quasi doppio da entrambi i lati.
 
-La classe non conosce né PIL né le ROI: riceve `in_battle` e `signature`
-già calcolati e ritorna l'evento. Così è verificabile senza emulatore.
+I lati vengono confrontati separatamente: mettendoli in un'unica stringa, il
+lato rimasto uguale diluirebbe la differenza dell'altro.
+
+La classe non conosce né PIL né le ROI: riceve `in_battle` e `signature` già
+calcolati e ritorna l'evento. Così è verificabile senza emulatore.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from difflib import SequenceMatcher
 from enum import Enum
+
+# Firma di un lato: il testo del riquadro nome, così come esce dall'OCR.
+Signature = Sequence[str]
 
 
 class BattleEvent(Enum):
@@ -37,12 +56,12 @@ class BattleEvent(Enum):
 
     ENTERED = "entered"
     LEFT = "left"
-    OPPONENT_CHANGED = "opponent_changed"
+    COMBATANTS_CHANGED = "combatants_changed"
 
 
-# Bit di differenza oltre i quali due firme sono considerate Pokemon diversi.
-# Sotto questa soglia le differenze sono rumore di scaling sullo stesso nome.
-DEFAULT_SIGNATURE_DISTANCE = 12
+# Similarità sotto la quale due letture sono considerate Pokemon diversi.
+# Misurato su cattura live: rumore OCR 0.91-0.96, Pokemon diversi 0.40-0.46.
+DEFAULT_SIGNATURE_SIMILARITY = 0.75
 # Osservazioni concordi richieste prima di accettare un cambio di stato.
 DEFAULT_CONFIRMATIONS = 2
 
@@ -54,14 +73,14 @@ class BattleWatcher:
         self,
         *,
         confirmations: int = DEFAULT_CONFIRMATIONS,
-        signature_distance: int = DEFAULT_SIGNATURE_DISTANCE,
+        min_similarity: float = DEFAULT_SIGNATURE_SIMILARITY,
     ) -> None:
         if confirmations < 1:
             raise ValueError(f"confirmations must be >= 1, got {confirmations}")
         self._confirmations = confirmations
-        self._signature_distance = signature_distance
+        self._min_similarity = min_similarity
         self._in_battle = False
-        self._signature: str | None = None
+        self._signature: Signature | None = None
         self._pending: bool | None = None
         self._pending_count = 0
 
@@ -82,7 +101,7 @@ class BattleWatcher:
         self._pending = None
         self._pending_count = 0
 
-    def observe(self, in_battle: bool, signature: str | None = None) -> BattleEvent | None:
+    def observe(self, in_battle: bool, signature: Signature | None = None) -> BattleEvent | None:
         """Registra un'osservazione e ritorna l'eventuale transizione."""
         if in_battle != self._in_battle:
             return self._observe_change(in_battle, signature)
@@ -94,7 +113,7 @@ class BattleWatcher:
             return None
         return self._observe_same_battle(signature)
 
-    def _observe_change(self, in_battle: bool, signature: str | None) -> BattleEvent | None:
+    def _observe_change(self, in_battle: bool, signature: Signature | None) -> BattleEvent | None:
         """Accumula osservazioni discordi finché non raggiungono l'isteresi."""
         if self._pending == in_battle:
             self._pending_count += 1
@@ -113,26 +132,33 @@ class BattleWatcher:
         self._signature = None
         return BattleEvent.LEFT
 
-    def _observe_same_battle(self, signature: str | None) -> BattleEvent | None:
-        """In battaglia da prima: cerca un cambio di avversario."""
+    def _observe_same_battle(self, signature: Signature | None) -> BattleEvent | None:
+        """In battaglia da prima: cerca un cambio fra i Pokemon in campo."""
         if signature is None:
             return None
         if self._signature is None:
             # Prima firma utile della battaglia corrente: adottala in silenzio.
             self._signature = signature
             return None
-        if signature_differs(self._signature, signature, self._signature_distance):
+        if signatures_differ(self._signature, signature, self._min_similarity):
             self._signature = signature
-            return BattleEvent.OPPONENT_CHANGED
+            return BattleEvent.COMBATANTS_CHANGED
         return None
 
 
-def signature_differs(left: str, right: str, max_distance: int) -> bool:
-    """Vero se due firme esadecimali distano più di `max_distance` bit.
+def signatures_differ(left: Signature, right: Signature, min_similarity: float) -> bool:
+    """Vero se almeno un lato è cambiato oltre la tolleranza sul rumore OCR.
 
     Firme di lunghezza diversa non sono confrontabili: le trattiamo come
-    diverse, piuttosto che sollevare un errore in mezzo al polling.
+    diverse, piuttosto che sollevare un errore in mezzo al polling. Una
+    lettura vuota, invece, non prova nulla — l'OCR può aver mancato il
+    riquadro per un frame — e non conta come cambio.
     """
     if len(left) != len(right):
         return True
-    return bin(int(left, 16) ^ int(right, 16)).count("1") > max_distance
+    for before, after in zip(left, right, strict=True):
+        if not before or not after:
+            continue
+        if SequenceMatcher(None, before, after).ratio() < min_similarity:
+            return True
+    return False

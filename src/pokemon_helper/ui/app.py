@@ -217,6 +217,9 @@ def run() -> int:
     window.show()
 
     _wire_persistence(window, team_panel, state, store)
+    # Le card avversario compaiono e spariscono: senza questo la finestra
+    # cresce a inizio combattimento e resta alta e mezza vuota alla fine.
+    team_panel.contentResized.connect(window.fit_height)
     _wire_nickname_dialog(window, team_panel, repository, state, store)
 
     bridge = _HotkeyBridge()
@@ -286,7 +289,6 @@ def _init_recognize_hotkey(
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
         from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
-        from pokemon_helper.vision.sprite_hash import compute_phash
     except ImportError as exc:
         print(f"[vision] deps non installate, riconoscimento disabilitato: {exc}")
         return None
@@ -433,12 +435,20 @@ def _init_recognize_hotkey(
     team_panel.reloadTeamRequested.connect(lambda: worker.submit(on_recognize_team))
 
     def probe() -> tuple[bool, str | None]:
-        """Un giro di osservazione: siamo in battaglia, e contro chi.
+        """Un giro di osservazione: siamo in battaglia, e chi c'è in campo.
 
-        La firma è il pHash del solo riquadro del nome avversario: cambia in
-        modo netto quando entra in campo un altro Pokemon e resta stabile
-        durante le animazioni, che toccano sprite e barre ma non il nome.
-        Costa una frazione di millisecondo sul frame già catturato.
+        La firma è il testo dei due riquadri nome, giocatore e avversario,
+        confrontato per similarità da `BattleWatcher`. Copre entrambi i lati
+        di proposito: il cambio dell'avversario si vedrebbe comunque (durante
+        l'animazione il suo HUD sparisce, quindi arrivano LEFT e ENTERED),
+        mentre un cambio del giocatore non muove nulla nello stato di
+        battaglia e passerebbe inosservato, lasciando la card player sul
+        Pokemon precedente.
+
+        Il testo costa due chiamate OCR (~16 ms) contro la frazione di
+        millisecondo di un pHash, ma il pHash qui non è utilizzabile: il
+        contenuto del frame trasla di un paio di pixel fra una cattura e
+        l'altra, e basta a farlo oscillare fra due valori a gioco fermo.
 
         Emulatore chiuso o cattura fallita valgono "fuori combattimento": è
         la lettura giusta, e fa svuotare il pannello.
@@ -455,8 +465,11 @@ def _init_recognize_hotkey(
         if not in_battle:
             return False, None
         game_area = compute_game_area(frame.width, frame.height, layout)
-        name_crop = frame.crop(roi_to_pixels(rois.opponent_name, game_area).as_crop_box())
-        return True, compute_phash(name_crop)
+        signature = tuple(
+            _first_text(ocr.recognize(frame.crop(roi_to_pixels(roi, game_area).as_crop_box())))
+            for roi in (rois.opponent_name, rois.player_name)
+        )
+        return True, signature
 
     def on_battle_event(event) -> None:
         """Thread worker: reagisce a una transizione rilevata dal watcher."""
@@ -496,6 +509,11 @@ class _HotkeyGroup:
                 hk.stop()
             except Exception as exc:  # noqa: BLE001
                 print(f"[hotkey] errore stop: {exc}")
+
+
+def _first_text(ocr_results) -> str:
+    """Primo testo OCR di un crop, o stringa vuota se non ne è uscito nessuno."""
+    return ocr_results[0].text if ocr_results else ""
 
 
 def _team_snapshot_looks_like_menu(results) -> tuple[bool, str]:
