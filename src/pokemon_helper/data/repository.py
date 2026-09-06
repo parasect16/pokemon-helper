@@ -135,7 +135,7 @@ class PokemonRepository:
         if not 1 <= generation <= 5:
             raise ValueError(f"unsupported generation: {generation}")
         rows = self._conn.execute(
-            "SELECT a.id, a.identifier, a.name_en, a.name_it, pa.slot, pa.is_hidden "
+            "SELECT a.id, a.identifier, a.name_en, a.name_it, a.description, pa.slot, pa.is_hidden "
             "FROM pokemon_abilities pa JOIN abilities a ON a.id = pa.ability_id "
             "WHERE pa.pokemon_id = ? "
             "  AND a.generation_introduced <= ? "
@@ -149,6 +149,7 @@ class PokemonRepository:
                 identifier=row["identifier"],
                 name_en=row["name_en"],
                 name_it=row["name_it"],
+                description=row["description"],
                 slot=int(row["slot"]),
                 is_hidden=bool(row["is_hidden"]),
             )

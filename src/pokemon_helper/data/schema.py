@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS abilities (
     identifier TEXT NOT NULL UNIQUE,
     name_en TEXT NOT NULL,
     name_it TEXT,
+    -- Descrizione in linguaggio naturale, presa dal flavor text del gioco.
+    -- Italiano quando disponibile, altrimenti inglese.
+    description TEXT,
     generation_introduced INTEGER NOT NULL
         CHECK (generation_introduced BETWEEN 3 AND 5)
 );

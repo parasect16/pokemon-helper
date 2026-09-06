@@ -6,8 +6,23 @@ logica di dominio anche se vive accanto ai widget. Nessun Qt viene istanziato.
 
 from __future__ import annotations
 
+import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QComboBox
+
 from pokemon_helper.data.models import Ability
-from pokemon_helper.ui.opponent_panel import resolve_ability, uncertain_abilities
+from pokemon_helper.ui.opponent_panel import (
+    _sync_combo_tooltip,
+    resolve_ability,
+    uncertain_abilities,
+)
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    """QApplication condivisa: i widget Qt non si costruiscono senza."""
+    app = QApplication.instance() or QApplication([])
+    yield app
 
 
 def _ability(identifier: str, slot: int = 1) -> Ability:
@@ -16,6 +31,7 @@ def _ability(identifier: str, slot: int = 1) -> Ability:
         identifier=identifier,
         name_en=identifier.replace("-", " ").title(),
         name_it=None,
+        description=None,
         slot=slot,
         is_hidden=False,
     )
@@ -82,3 +98,41 @@ def test_flagging_respects_the_generation_of_the_effect() -> None:
     candidates = [_ability("lightning-rod"), STURDY]
     assert uncertain_abilities(None, candidates, 4) == []
     assert [a.identifier for a in uncertain_abilities(None, candidates, 5)] == ["lightning-rod"]
+
+
+# --- tooltip del menu a tendina ---
+
+
+def _combo_with(descriptions: list[str | None]) -> QComboBox:
+    """QComboBox con una voce "?" iniziale e una voce per descrizione."""
+    box = QComboBox()
+    box.addItem("Abilità: ?", None)
+    for index, description in enumerate(descriptions, start=1):
+        box.addItem(f"voce {index}", f"id{index}")
+        if description is not None:
+            box.setItemData(index, description, Qt.ItemDataRole.ToolTipRole)
+    return box
+
+
+def test_the_closed_combo_shows_the_tooltip_of_the_selected_item(qapp) -> None:
+    """Qt mostra i tooltip per voce solo a menu aperto, ed è il caso sbagliato."""
+    box = _combo_with(["Immune agli attacchi di tipo Terra.", "Non cade in trappola."])
+    box.setCurrentIndex(1)
+    _sync_combo_tooltip(box)
+    assert box.toolTip() == "Immune agli attacchi di tipo Terra."
+
+
+def test_the_tooltip_follows_the_selection(qapp) -> None:
+    box = _combo_with(["prima", "seconda"])
+    box.setCurrentIndex(2)
+    _sync_combo_tooltip(box)
+    assert box.toolTip() == "seconda"
+
+
+def test_an_item_without_description_clears_the_tooltip(qapp) -> None:
+    box = _combo_with(["prima", None])
+    box.setCurrentIndex(1)
+    _sync_combo_tooltip(box)
+    box.setCurrentIndex(2)
+    _sync_combo_tooltip(box)
+    assert box.toolTip() == ""

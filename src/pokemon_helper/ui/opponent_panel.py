@@ -226,15 +226,22 @@ class OpponentPanel(QWidget):
         """Riga abilità: etichetta se è certa, menu a tendina se è ambigua."""
         generation = self._state.generation
         if len(candidates) == 1:
-            label = QLabel(f"Abilità: {candidates[0].display_name}", parent)
+            ability = candidates[0]
+            label = QLabel(f"Abilità: {ability.display_name}", parent)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setStyleSheet("color: #b8b8c8; font-size: 11px;")
+            if ability.description:
+                label.setToolTip(ability.description)
             return label
 
         box = QComboBox(parent)
         box.addItem("Abilità: ?", None)
         for ability in candidates:
             box.addItem(ability.display_name, ability.identifier)
+            # Tooltip per voce: leggendo il menu si capisce cosa fa ciascuna
+            # senza doverla prima scegliere.
+            if ability.description:
+                box.setItemData(box.count() - 1, ability.description, Qt.ItemDataRole.ToolTipRole)
         box.setCurrentIndex(
             next(
                 (i for i in range(box.count()) if box.itemData(i) == applied),
@@ -248,8 +255,14 @@ class OpponentPanel(QWidget):
         unknown = uncertain_abilities(applied, candidates, generation)
         if unknown:
             names = ", ".join(a.display_name for a in unknown)
-            box.setToolTip(f"Cambierebbero l'efficacia: {names}")
             box.setStyleSheet("font-size: 11px; border: 1px solid #e0c060;")
+            box.setItemData(
+                0,
+                f"Non applicata: cambierebbero l'efficacia {names}",
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        _sync_combo_tooltip(box)
+        box.currentIndexChanged.connect(lambda _index, widget=box: _sync_combo_tooltip(widget))
         box.currentIndexChanged.connect(
             lambda index, pid=pokemon_id, widget=box: self.abilityPinned.emit(
                 pid, widget.itemData(index)
@@ -280,6 +293,15 @@ class OpponentPanel(QWidget):
 # ---------------------------------------------------------------------------
 # Helper di rendering
 # ---------------------------------------------------------------------------
+
+
+def _sync_combo_tooltip(box: QComboBox) -> None:
+    """Porta il tooltip della voce selezionata sul widget chiuso.
+
+    Qt mostra i tooltip per voce solo a menu aperto: senza questo, passare il
+    mouse sul menu chiuso non direbbe nulla, che è proprio il caso d'uso.
+    """
+    box.setToolTip(box.itemData(box.currentIndex(), Qt.ItemDataRole.ToolTipRole) or "")
 
 
 def resolve_ability(candidates: list, pinned: str | None) -> tuple[str | None, list]:

@@ -232,19 +232,29 @@ def ingest_abilities(conn: sqlite3.Connection) -> None:
     ability_rows = [
         row for row in _read_csv("abilities.csv") if int(row["generation_id"]) <= MAX_GEN
     ]
-    ability_inserts: list[tuple[int, str, str, str | None, int]] = []
+    descriptions = _ability_descriptions(lang_ids)
+
+    ability_inserts: list[tuple[int, str, str, str | None, str | None, int]] = []
     for row in ability_rows:
         ability_id = int(row["id"])
         identifier = row["identifier"]
         name_en = names_by_lang.get(lang_ids[ENGLISH_ISO], {}).get(ability_id, identifier.title())
         name_it = names_by_lang.get(lang_ids[ITALIAN_ISO], {}).get(ability_id)
         ability_inserts.append(
-            (ability_id, identifier, name_en, name_it, int(row["generation_id"]))
+            (
+                ability_id,
+                identifier,
+                name_en,
+                name_it,
+                descriptions.get(ability_id),
+                int(row["generation_id"]),
+            )
         )
 
     conn.executemany(
-        "INSERT INTO abilities (id, identifier, name_en, name_it, generation_introduced) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO abilities "
+        "(id, identifier, name_en, name_it, description, generation_introduced) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         ability_inserts,
     )
 
@@ -297,6 +307,38 @@ def _read_csv(name: str) -> list[dict[str, str]]:
     """Legge un CSV di veekun come lista di dict (colonna -> valore stringa)."""
     with (CSV_DIR / name).open(encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _ability_descriptions(lang_ids: dict[str, int]) -> dict[int, str]:
+    """Descrizione discorsiva per abilità, italiano con fallback inglese.
+
+    La sorgente è `ability_flavor_text.csv`, cioè il testo che il gioco mostra
+    davvero. `ability_prose.csv` avrebbe descrizioni più precise ma infarcite
+    di markup (`[termine]{mechanic:...}`) e disponibili solo in inglese e
+    tedesco.
+
+    Di ogni abilità si prende il testo del `version_group_id` più alto: le
+    riformulazioni successive sono di norma più chiare e la copertura è
+    migliore sui gruppi recenti. Gli a-capo del gioco diventano spazi, perché
+    il testo finisce in un tooltip che va a capo da solo.
+    """
+    by_lang: dict[int, dict[int, tuple[int, str]]] = {}
+    for row in _read_csv("ability_flavor_text.csv"):
+        lang = int(row["language_id"])
+        ability_id = int(row["ability_id"])
+        version_group = int(row["version_group_id"])
+        best = by_lang.setdefault(lang, {}).get(ability_id)
+        if best is None or version_group > best[0]:
+            by_lang[lang][ability_id] = (version_group, row["flavor_text"])
+
+    italian = by_lang.get(lang_ids[ITALIAN_ISO], {})
+    english = by_lang.get(lang_ids[ENGLISH_ISO], {})
+    descriptions: dict[int, str] = {}
+    for ability_id in set(italian) | set(english):
+        entry = italian.get(ability_id) or english.get(ability_id)
+        if entry is not None:
+            descriptions[ability_id] = " ".join(entry[1].split())
+    return descriptions
 
 
 def _ability_names_by_lang() -> dict[int, dict[int, str]]:

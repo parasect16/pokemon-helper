@@ -77,11 +77,11 @@ _TYPES_ROWS: tuple[tuple[int, int, int, str], ...] = (
 # (id, identifier, name_en, name_it, generation_introduced). Scelte per
 # coprire i tre assi del filtro di `get_abilities`: introduzione tardiva,
 # abilità nascosta, effetto che dipende dalla generazione.
-_ABILITY_ROWS: tuple[tuple[int, str, str, str | None, int], ...] = (
-    (26, "levitate", "Levitate", "Levitazione", 3),
-    (78, "motor-drive", "Motor Drive", "Elettrorapid", 4),
-    (10, "volt-absorb", "Volt Absorb", None, 3),
-    (157, "sap-sipper", "Sap Sipper", "Mangiaerba", 5),
+_ABILITY_ROWS: tuple[tuple[int, str, str, str | None, str | None, int], ...] = (
+    (26, "levitate", "Levitate", "Levitazione", "Immune agli attacchi di tipo Terra.", 3),
+    (78, "motor-drive", "Motor Drive", "Elettrorapid", None, 4),
+    (10, "volt-absorb", "Volt Absorb", None, None, 3),
+    (157, "sap-sipper", "Sap Sipper", "Mangiaerba", None, 5),
 )
 
 # (pokemon_id, ability_id, slot, is_hidden).
@@ -111,8 +111,9 @@ def repository() -> Iterator[PokemonRepository]:
         _TYPES_ROWS,
     )
     connection.executemany(
-        "INSERT INTO abilities (id, identifier, name_en, name_it, generation_introduced) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO abilities "
+        "(id, identifier, name_en, name_it, description, generation_introduced) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         _ABILITY_ROWS,
     )
     connection.executemany(

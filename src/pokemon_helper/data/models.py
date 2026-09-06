@@ -37,6 +37,7 @@ class Ability:
             `engine.abilities` decide se e come modificare l'efficacia.
         name_en: nome in inglese formattato per display.
         name_it: nome in italiano, se disponibile nel dataset upstream.
+        description: descrizione discorsiva presa dal gioco, per il tooltip.
         slot: 1 o 2 per le abilità ordinarie, 3 per la nascosta.
         is_hidden: abilità nascosta, esistente solo dalla Gen 5.
     """
@@ -45,6 +46,7 @@ class Ability:
     identifier: str
     name_en: str
     name_it: str | None
+    description: str | None
     slot: int
     is_hidden: bool
 
