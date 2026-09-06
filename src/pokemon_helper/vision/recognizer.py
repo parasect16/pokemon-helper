@@ -24,6 +24,7 @@ from difflib import SequenceMatcher
 from PIL import Image
 
 from pokemon_helper.data import PokemonRepository
+from pokemon_helper.vision.level_reader import read_level
 from pokemon_helper.vision.ocr import OcrEngine, OcrResult
 from pokemon_helper.vision.roi import GameLayout, GameRois, compute_game_area, roi_to_pixels
 from pokemon_helper.vision.sprite_hash import compute_icon_phash, compute_phash
@@ -176,13 +177,15 @@ class Recognizer:
             ocr_lines = self._ocr.recognize(crop)
             name_text = _pick_name_text(ocr_lines)
 
-            # OCR dedicata sul crop del livello con preprocessing forte:
-            # `high_contrast=True` normalizza il testo bianco-su-blu del menu
-            # in nero-su-bianco standard; `upscale=4` porta i glifi pixel
-            # piccoli a dimensioni digeribili da RapidOCR.
+            # `read_level` segmenta il crop e legge una cifra alla volta: sui
+            # font pixel scalati a fattore non intero è l'unico modo che dà
+            # letture stabili (vedi `level_reader`). Il vecchio percorso, OCR
+            # sull'intera stringa, resta come fallback.
             level_crop = frame.crop(roi_to_pixels(slot_levels[index], game_area).as_crop_box())
-            level_lines = self._ocr.recognize(level_crop, upscale=4, high_contrast=True)
-            level = _extract_level(level_lines) or _extract_level(ocr_lines)
+            level = read_level(level_crop, self._ocr)
+            if level is None:
+                level_lines = self._ocr.recognize(level_crop, upscale=4, high_contrast=True)
+                level = _extract_level(level_lines) or _extract_level(ocr_lines)
 
             pokemon_id: int | None = None
             confidence = 0.0
