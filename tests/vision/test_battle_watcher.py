@@ -122,6 +122,46 @@ def test_signature_is_forgotten_on_leaving() -> None:
     assert watcher.observe(True, SIG_A) is BattleEvent.ENTERED
 
 
+def test_unknown_screen_holds_the_battle_state() -> None:
+    """L'elenco Pokemon si apre a lotta in corso: non deve svuotare il pannello."""
+    watcher = BattleWatcher(confirmations=2)
+    _feed(watcher, 2, True, SIG_A)
+    assert _feed(watcher, 5, None) == [None] * 5
+    assert watcher.in_battle is True
+
+
+def test_battle_resumes_after_an_unknown_stretch_without_re_entering() -> None:
+    """Chiuso l'elenco si torna in battaglia: nessun evento, era sempre la stessa."""
+    watcher = BattleWatcher(confirmations=2)
+    _feed(watcher, 2, True, SIG_A)
+    _feed(watcher, 4, None)
+    assert _feed(watcher, 2, True, SIG_A) == [None, None]
+
+
+def test_a_switch_made_from_the_party_menu_is_detected_on_return() -> None:
+    """Il caso reale: apri l'elenco, cambi Pokemon, torni in campo."""
+    watcher = BattleWatcher(confirmations=2)
+    _feed(watcher, 2, True, SIG_A)
+    _feed(watcher, 3, None)
+    assert watcher.observe(True, (SIG_A[0], "ELECTRODE L.39")) is BattleEvent.COMBATANTS_CHANGED
+
+
+def test_unknown_screen_clears_a_pending_transition() -> None:
+    """Una transizione va confermata da osservazioni davvero consecutive."""
+    watcher = BattleWatcher(confirmations=2)
+    _feed(watcher, 2, True, SIG_A)
+    assert watcher.observe(False) is None  # prima meta di un'uscita
+    assert watcher.observe(None) is None  # interruzione
+    assert watcher.observe(False) is None  # riparte da capo, non conclude
+    assert watcher.in_battle is True
+
+
+def test_unknown_screen_outside_battle_stays_outside() -> None:
+    watcher = BattleWatcher(confirmations=2)
+    assert _feed(watcher, 3, None) == [None] * 3
+    assert watcher.in_battle is False
+
+
 def test_reset_forgets_an_ongoing_battle() -> None:
     """Riattivando l'auto-detect a lotta in corso deve riemettere ENTERED."""
     watcher = BattleWatcher(confirmations=1)

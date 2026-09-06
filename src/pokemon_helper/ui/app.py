@@ -101,6 +101,14 @@ class _RecognizeWorker:
                 print(f"[recognize-worker] eccezione: {exc}")
 
 
+# Intervallo fra due poll dell'auto-detect. Ogni poll apre e chiude una
+# sessione di Windows Graphics Capture, e il sistema disegna un bordo attorno
+# alla finestra catturata: a 500 ms lampeggiava due volte al secondo, cosa che
+# dà fastidio mentre si gioca. A 1500 ms il combattimento viene rilevato entro
+# ~3 s (due osservazioni concordi) e il bordo si fa molto più discreto.
+POLL_INTERVAL_MS = 1500
+
+
 class _BattlePoller:
     """Interroga periodicamente la finestra dell'emulatore e ne emette gli eventi.
 
@@ -125,7 +133,7 @@ class _BattlePoller:
         watcher,
         probe: Callable[[], tuple[bool, str | None]],
         on_event: Callable[[object], None],
-        interval_ms: int = 500,
+        interval_ms: int = POLL_INTERVAL_MS,
     ) -> None:
         self._worker = worker
         self._watcher = watcher
@@ -283,7 +291,10 @@ def _init_recognize_hotkey(
     recognize (overhead ~1 ms). Zero contesa con il thread GUI, zero rischio.
     """
     try:
-        from pokemon_helper.vision.battle_detector import is_battle_screen
+        from pokemon_helper.vision.battle_detector import (
+            is_battle_screen,
+            is_party_menu_screen,
+        )
         from pokemon_helper.vision.battle_watcher import BattleEvent, BattleWatcher
         from pokemon_helper.vision.capture import CaptureError, WindowCapture
         from pokemon_helper.vision.ocr import OcrEngine
@@ -434,7 +445,7 @@ def _init_recognize_hotkey(
     team_panel.reloadOpponentRequested.connect(lambda: worker.submit(on_recognize))
     team_panel.reloadTeamRequested.connect(lambda: worker.submit(on_recognize_team))
 
-    def probe() -> tuple[bool, str | None]:
+    def probe() -> tuple[bool | None, tuple[str, ...] | None]:
         """Un giro di osservazione: siamo in battaglia, e chi c'è in campo.
 
         La firma è il testo dei due riquadri nome, giocatore e avversario,
@@ -451,7 +462,8 @@ def _init_recognize_hotkey(
         l'altra, e basta a farlo oscillare fra due valori a gioco fermo.
 
         Emulatore chiuso o cattura fallita valgono "fuori combattimento": è
-        la lettura giusta, e fa svuotare il pannello.
+        la lettura giusta, e fa svuotare il pannello. L'elenco Pokemon vale
+        invece "non lo so", e lascia il pannello com'è.
         """
         game_key = _GAME_BY_GENERATION.get(state.generation)
         if game_key is None:
@@ -461,6 +473,10 @@ def _init_recognize_hotkey(
             frame = capture.capture_frame(timeout_seconds=3.0).image
         except CaptureError, TimeoutError:
             return False, None
+        # L'elenco Pokemon si apre *durante* la lotta per cambiare Pokemon:
+        # non dice nulla sul combattimento, quindi non va letto come "finito".
+        if is_party_menu_screen(frame, layout):
+            return None, None
         in_battle, _ = is_battle_screen(frame, layout, rois)
         if not in_battle:
             return False, None

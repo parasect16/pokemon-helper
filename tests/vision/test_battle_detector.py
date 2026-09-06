@@ -13,6 +13,7 @@ from PIL import Image
 from pokemon_helper.vision.battle_detector import (
     MIN_HP_PIXELS,
     is_battle_screen,
+    is_party_menu_screen,
 )
 from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
 
@@ -104,3 +105,35 @@ def test_threshold_boundary_behavior() -> None:
     frame_at = Image.fromarray(arr, mode="RGB")
     ok, _ = is_battle_screen(frame_at, LAYOUT, ROIS)
     assert ok is True
+
+
+# I casi qui sotto partono da un frame grigio: il default di `_blank_frame` è
+# già teal e renderebbe vacui i casi negativi.
+_NEUTRAL = (180, 180, 180)
+
+
+def test_party_menu_is_recognised_by_its_teal_background() -> None:
+    """Sfondo teal su buona parte dello schermo = elenco Pokemon."""
+    frame = _blank_frame(_NEUTRAL)
+    game_area = compute_game_area(frame.width, frame.height, LAYOUT)
+    teal = Image.new("RGB", (game_area.w, game_area.h), (32, 152, 152))
+    frame.paste(teal, (game_area.x, game_area.y))
+    assert is_party_menu_screen(frame, LAYOUT) is True
+
+
+def test_battle_background_is_not_a_party_menu() -> None:
+    """Erba e cielo sono verdi e azzurri, ma non poveri di rosso come il teal."""
+    frame = _blank_frame(_NEUTRAL)
+    game_area = compute_game_area(frame.width, frame.height, LAYOUT)
+    grass = Image.new("RGB", (game_area.w, game_area.h), (168, 216, 168))
+    frame.paste(grass, (game_area.x, game_area.y))
+    assert is_party_menu_screen(frame, LAYOUT) is False
+
+
+def test_a_teal_patch_below_the_threshold_is_not_a_party_menu() -> None:
+    """Un elemento teal isolato non basta: deve coprire buona parte dello schermo."""
+    frame = _blank_frame(_NEUTRAL)
+    game_area = compute_game_area(frame.width, frame.height, LAYOUT)
+    patch = Image.new("RGB", (game_area.w // 10, game_area.h // 2), (32, 152, 152))
+    frame.paste(patch, (game_area.x, game_area.y))
+    assert is_party_menu_screen(frame, LAYOUT) is False

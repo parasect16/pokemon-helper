@@ -5,7 +5,8 @@ un frame e l'altro per riconoscere le *transizioni*, che sono ciò che
 interessa a chi deve aggiornare il pannello:
 
 - si entra in combattimento → riconoscere chi è in campo;
-- si esce → svuotare il pannello;
+- si esce davvero → svuotare il pannello, senza farsi ingannare dalle
+  schermate che coprono la battaglia senza chiuderla;
 - cambia un Pokemon a metà lotta, da una parte o dall'altra → riconoscere di
   nuovo.
 
@@ -20,9 +21,9 @@ Due accortezze rendono il tutto usabile su frame reali:
 **Isteresi.** Durante dissolvenze e animazioni la barra HP sparisce per
 qualche frame, e un singolo frame anomalo non deve far rimbalzare lo stato.
 Serve `confirmations` osservazioni consecutive concordi prima di cambiare
-idea. A 500 ms di intervallo, il default di 2 costa un secondo di ritardo
-sull'ingresso in battaglia — utile comunque, perché dà tempo agli sprite di
-finire di comparire prima che parta il riconoscimento.
+idea. Il default di 2 costa due intervalli di ritardo sull'ingresso in
+battaglia — utile comunque, perché dà tempo agli sprite di finire di
+comparire prima che parta il riconoscimento.
 
 **Firma testuale, non pittorica.** La prima versione confrontava il pHash dei
 riquadri nome e produceva falsi positivi in continuazione: fra una cattura e
@@ -101,8 +102,24 @@ class BattleWatcher:
         self._pending = None
         self._pending_count = 0
 
-    def observe(self, in_battle: bool, signature: Signature | None = None) -> BattleEvent | None:
-        """Registra un'osservazione e ritorna l'eventuale transizione."""
+    def observe(
+        self, in_battle: bool | None, signature: Signature | None = None
+    ) -> BattleEvent | None:
+        """Registra un'osservazione e ritorna l'eventuale transizione.
+
+        `in_battle=None` significa "non lo so": lo stato resta com'è e non
+        viene emesso nulla. Serve per le schermate che non dicono nulla sul
+        combattimento — l'elenco Pokemon su tutte, che si apre proprio *per*
+        cambiare Pokemon a metà lotta e in cui la barra HP avversaria non è
+        visibile. Trattarla come "fuori combattimento" svuoterebbe il
+        pannello nel momento in cui serve di più.
+        """
+        if in_battle is None:
+            # Azzera i pending: una transizione va confermata da osservazioni
+            # davvero consecutive, non da due spezzoni separati da una pausa.
+            self._pending = None
+            self._pending_count = 0
+            return None
         if in_battle != self._in_battle:
             return self._observe_change(in_battle, signature)
 
