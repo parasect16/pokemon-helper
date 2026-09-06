@@ -18,6 +18,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFrame,
@@ -51,6 +52,7 @@ class TeamPanel(QWidget):
     reloadTeamRequested = Signal()  # utente ha cliccato "Ricarica squadra"
     reloadOpponentRequested = Signal()  # utente ha cliccato "Ricarica avversario"
     nicknamesRequested = Signal()  # utente ha cliccato "Nickname"
+    autoDetectToggled = Signal(bool)  # utente ha cambiato l'interruttore auto-detect
 
     def __init__(
         self,
@@ -163,8 +165,24 @@ class TeamPanel(QWidget):
         self._nicknames_btn.clicked.connect(lambda: self.nicknamesRequested.emit())
         row.addWidget(self._nicknames_btn)
 
+        # Interruttore F4. Spento di default: mentre è attivo l'app cattura la
+        # finestra dell'emulatore due volte al secondo, quindi deve essere una
+        # scelta esplicita dell'utente e non un comportamento implicito.
+        self._auto_detect_box = QCheckBox("Auto", self)
+        self._auto_detect_box.setToolTip(
+            "Rileva da solo l'inizio del combattimento e il cambio di avversario"
+        )
+        self._auto_detect_box.toggled.connect(lambda on: self.autoDetectToggled.emit(on))
+        row.addWidget(self._auto_detect_box)
+
         row.addStretch(1)
         return row
+
+    def set_auto_detect(self, enabled: bool) -> None:
+        """Allinea l'interruttore allo stato persistito, senza emettere segnali."""
+        was_blocked = self._auto_detect_box.blockSignals(True)
+        self._auto_detect_box.setChecked(enabled)
+        self._auto_detect_box.blockSignals(was_blocked)
 
     def set_reload_buttons_enabled(self, enabled: bool) -> None:
         """Abilita/disabilita entrambi i pulsanti di ricarica.

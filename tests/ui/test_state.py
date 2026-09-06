@@ -117,12 +117,24 @@ def test_state_store_roundtrip_preserves_full_state(tmp_path: Path) -> None:
         overlay_x=100,
         overlay_y=200,
         nicknames={"FIAMMETTA": 6, "SPARKY": 25},
+        auto_detect=True,
     )
     store = StateStore(tmp_path / "state.json")
     store.save(original)
     restored = store.load()
     assert restored == original
     assert restored.nicknames == {"FIAMMETTA": 6, "SPARKY": 25}
+    assert restored.auto_detect is True
+
+
+def test_auto_detect_defaults_to_off_for_older_state_files(tmp_path: Path) -> None:
+    """File scritti prima di F4 non hanno la chiave: il polling resta spento."""
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps({"generation": 3, "team": [None] * 6}),
+        encoding="utf-8",
+    )
+    assert StateStore(path).load().auto_detect is False
 
 
 def test_state_store_normalizes_nicknames_to_uppercase(tmp_path: Path) -> None:

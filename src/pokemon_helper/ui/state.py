@@ -47,6 +47,10 @@ class AppState:
     da `Recognizer.recognize_team` come override sul fuzzy match: quando il
     gioco mostra un nickname custom (es. "FIAMMETTA" per Charizard), fuzzy
     fallisce ma il mapping utente risolve.
+
+    `auto_detect` abilita il polling periodico della finestra dell'emulatore
+    (F4). È spento di default: mentre è attivo l'app cattura lo schermo di
+    continuo, e quella è una scelta che deve restare dell'utente.
     """
 
     generation: int = DEFAULT_GENERATION
@@ -54,6 +58,7 @@ class AppState:
     overlay_x: int | None = None
     overlay_y: int | None = None
     nicknames: dict[str, int] = field(default_factory=dict)
+    auto_detect: bool = False
 
     def __post_init__(self) -> None:
         if not MIN_GENERATION <= self.generation <= MAX_GENERATION:
@@ -129,6 +134,7 @@ def _serialize(state: AppState) -> dict:
         "overlay_x": state.overlay_x,
         "overlay_y": state.overlay_y,
         "nicknames": dict(state.nicknames),
+        "auto_detect": state.auto_detect,
     }
 
 
@@ -157,6 +163,7 @@ def _deserialize(payload: dict) -> AppState:
         overlay_x=_optional_int(payload.get("overlay_x")),
         overlay_y=_optional_int(payload.get("overlay_y")),
         nicknames=nicknames,
+        auto_detect=bool(payload.get("auto_detect", False)),
     )
 
 

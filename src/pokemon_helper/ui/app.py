@@ -56,6 +56,7 @@ class _RecognizeBridge(QObject):
     opponent_recognized = Signal(int)  # pokemon_id avversario
     player_recognized = Signal(object)  # pokemon_id giocatore, o None
     team_updated = Signal(object)  # list[TeamSlot | None] con nuovo team
+    opponent_cleared = Signal()  # combattimento finito: svuota il pannello
     # Failures separati per far apparire il warning sul pulsante giusto.
     opponent_failed = Signal(str)  # messaggio d'errore riconoscimento avversario
     team_failed = Signal(str)  # messaggio d'errore riconoscimento squadra
@@ -98,6 +99,77 @@ class _RecognizeWorker:
                 job()
             except Exception as exc:  # noqa: BLE001
                 print(f"[recognize-worker] eccezione: {exc}")
+
+
+class _BattlePoller:
+    """Interroga periodicamente la finestra dell'emulatore e ne emette gli eventi.
+
+    Il timer vive sul thread GUI ma non cattura nulla: accoda un job al
+    `_RecognizeWorker`, perché `windows-capture` va usata sempre dallo stesso
+    thread con l'apartment COM già inizializzato. Passare dal worker ha un
+    secondo vantaggio: i poll si serializzano con i riconoscimenti manuali,
+    quindi due catture non si sovrappongono mai.
+
+    Un poll che dura più dell'intervallo non deve accodarne altri: finché il
+    job precedente non ha finito, `_busy` fa saltare il tick. Meglio perdere
+    un giro che accumulare una coda che non si smaltisce più.
+
+    Le dipendenze arrivano dall'esterno (`watcher`, `probe`, `on_event`) così
+    questo modulo resta importabile anche senza gli extra `[vision]`.
+    """
+
+    def __init__(
+        self,
+        *,
+        worker: _RecognizeWorker,
+        watcher,
+        probe: Callable[[], tuple[bool, str | None]],
+        on_event: Callable[[object], None],
+        interval_ms: int = 500,
+    ) -> None:
+        self._worker = worker
+        self._watcher = watcher
+        self._probe = probe
+        self._on_event = on_event
+        self._busy = threading.Event()
+        self._timer = QTimer()
+        self._timer.setInterval(interval_ms)
+        self._timer.timeout.connect(self._tick)
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Avvia o ferma il polling."""
+        if enabled:
+            # Reset: riattivando a combattimento già in corso vogliamo che il
+            # primo poll produca comunque un ENTERED e popoli il pannello.
+            self._watcher.reset()
+            self._timer.start()
+        else:
+            self._timer.stop()
+
+    def stop(self) -> None:
+        """Ferma il timer. Firma allineata a `GlobalHotkey` per `_HotkeyGroup`."""
+        self._timer.stop()
+
+    def _tick(self) -> None:
+        """Thread GUI: accoda un poll se il precedente è finito."""
+        if self._busy.is_set():
+            return
+        self._busy.set()
+        self._worker.submit(self._poll)
+
+    def _poll(self) -> None:
+        """Thread worker: cattura, classifica, emette l'eventuale evento."""
+        try:
+            event = self._watcher.observe(*self._probe())
+            if event is not None:
+                self._on_event(event)
+        except Exception as exc:  # noqa: BLE001
+            # `probe` assorbe già i fallimenti attesi (emulatore chiuso) e li
+            # traduce in "fuori combattimento": ciò che arriva qui è un bug,
+            # quindi va visto.
+            print(f"[battle-poller] {exc}")
+        finally:
+            self._busy.clear()
 
 
 # Mappa generazione -> chiave di gioco supportata dai riconoscitori.
@@ -154,7 +226,7 @@ def run() -> int:
 
     # Riconoscimento: hotkey `<ctrl>+<alt>+r`. Se le deps `[vision]` non
     # sono installate, l'app funziona lo stesso senza riconoscimento.
-    recognize_hotkey = _init_recognize_hotkey(state, team_panel, repository)
+    recognize_hotkey = _init_recognize_hotkey(state, team_panel, repository, store)
 
     if os.environ.get("POKEMON_HELPER_SMOKE") == "1":
         # Modalità smoke: chiudi dopo 2 secondi senza input utente.
@@ -193,6 +265,7 @@ def _init_recognize_hotkey(
     state: AppState,
     team_panel: TeamPanel,
     repository: PokemonRepository,  # noqa: ARG001 — riservato per future estensioni
+    store: StateStore,
 ) -> GlobalHotkey | None:
     """Registra la hotkey `<ctrl>+<alt>+r` per il riconoscimento avversario.
 
@@ -208,10 +281,12 @@ def _init_recognize_hotkey(
     """
     try:
         from pokemon_helper.vision.battle_detector import is_battle_screen
+        from pokemon_helper.vision.battle_watcher import BattleEvent, BattleWatcher
         from pokemon_helper.vision.capture import CaptureError, WindowCapture
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
-        from pokemon_helper.vision.roi import GAME_ROIS
+        from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
+        from pokemon_helper.vision.sprite_hash import compute_phash
     except ImportError as exc:
         print(f"[vision] deps non installate, riconoscimento disabilitato: {exc}")
         return None
@@ -232,6 +307,9 @@ def _init_recognize_hotkey(
     bridge.opponent_recognized.connect(team_panel.set_opponent)
     bridge.opponent_recognized.connect(lambda _pid: team_panel.flash_opponent_reload_success())
     bridge.player_recognized.connect(team_panel.set_active_player)
+    # Fine del combattimento: via l'avversario e via l'evidenziazione dello slot.
+    bridge.opponent_cleared.connect(lambda: team_panel.set_opponent(None))
+    bridge.opponent_cleared.connect(lambda: team_panel.set_active_player(None))
     bridge.team_updated.connect(team_panel.replace_team)
     bridge.team_updated.connect(lambda _t: team_panel.flash_team_reload_success())
 
@@ -354,7 +432,56 @@ def _init_recognize_hotkey(
     team_panel.reloadOpponentRequested.connect(lambda: worker.submit(on_recognize))
     team_panel.reloadTeamRequested.connect(lambda: worker.submit(on_recognize_team))
 
-    return _HotkeyGroup([hotkey, team_hotkey, worker])
+    def probe() -> tuple[bool, str | None]:
+        """Un giro di osservazione: siamo in battaglia, e contro chi.
+
+        La firma è il pHash del solo riquadro del nome avversario: cambia in
+        modo netto quando entra in campo un altro Pokemon e resta stabile
+        durante le animazioni, che toccano sprite e barre ma non il nome.
+        Costa una frazione di millisecondo sul frame già catturato.
+
+        Emulatore chiuso o cattura fallita valgono "fuori combattimento": è
+        la lettura giusta, e fa svuotare il pannello.
+        """
+        game_key = _GAME_BY_GENERATION.get(state.generation)
+        if game_key is None:
+            return False, None
+        layout, rois = GAME_ROIS[game_key]
+        try:
+            frame = capture.capture_frame(timeout_seconds=3.0).image
+        except CaptureError, TimeoutError:
+            return False, None
+        in_battle, _ = is_battle_screen(frame, layout, rois)
+        if not in_battle:
+            return False, None
+        game_area = compute_game_area(frame.width, frame.height, layout)
+        name_crop = frame.crop(roi_to_pixels(rois.opponent_name, game_area).as_crop_box())
+        return True, compute_phash(name_crop)
+
+    def on_battle_event(event) -> None:
+        """Thread worker: reagisce a una transizione rilevata dal watcher."""
+        if event is BattleEvent.LEFT:
+            bridge.opponent_cleared.emit()
+            return
+        on_recognize()
+
+    poller = _BattlePoller(
+        worker=worker,
+        watcher=BattleWatcher(),
+        probe=probe,
+        on_event=on_battle_event,
+    )
+
+    def on_auto_detect(enabled: bool) -> None:
+        state.auto_detect = enabled
+        store.save(state)
+        poller.set_enabled(enabled)
+
+    team_panel.set_auto_detect(state.auto_detect)
+    team_panel.autoDetectToggled.connect(on_auto_detect)
+    poller.set_enabled(state.auto_detect)
+
+    return _HotkeyGroup([hotkey, team_hotkey, poller, worker])
 
 
 class _HotkeyGroup:
