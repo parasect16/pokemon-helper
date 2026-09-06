@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import pytest
 
-from pokemon_helper.vision.recognizer import _fuzzy_species, _id_allowed, _match_nickname
+from pokemon_helper.vision.recognizer import (
+    _apply_nickname_fallback,
+    _fuzzy_species,
+    _id_allowed,
+    _match_nickname,
+    _strip_level_suffix,
+)
 
 # Charizard = 6, Pikachu = 25, Gloom = 44.
 NICKNAMES = {"FIAMMETTA": 6, "SPARKY": 25}
@@ -125,3 +131,53 @@ def test_second_pass_can_also_miss() -> None:
     repo = _FakeRepo({})
     assert _fuzzy(repo, "ZZ1ZZ") == []
     assert repo.queries == ["ZZ1ZZ", "ZZIZZ"]
+
+
+def test_strong_species_match_blocks_the_nickname() -> None:
+    """Uno slot col nome di specie leggibile non va rubato da un nickname."""
+    matches, swapped = _apply_nickname_fallback([(18, 0.86)], "FIAMHETTA", NICKNAMES)
+    assert (matches, swapped) == ([(18, 0.86)], False)
+
+
+def test_weak_species_match_loses_to_the_nickname() -> None:
+    """Il caso HUD: fuzzy ristretto a 0.35 aggancia Pidgeot, il nickname vince."""
+    matches, swapped = _apply_nickname_fallback([(18, 0.375)], "FIAHHETTA", NICKNAMES)
+    assert swapped is True
+    pokemon_id, score = matches[0]
+    assert pokemon_id == 6
+    assert score > 0.375
+
+
+def test_no_species_match_falls_back_to_the_nickname() -> None:
+    matches, swapped = _apply_nickname_fallback([], "FIAHHETTA", NICKNAMES)
+    assert swapped is True
+    assert matches[0][0] == 6
+
+
+def test_weak_species_match_survives_a_weaker_nickname() -> None:
+    """Sotto soglia entrambi: vince comunque lo score più alto."""
+    matches, swapped = _apply_nickname_fallback([(18, 0.71)], "FIAHXXXXX", NICKNAMES)
+    assert (matches, swapped) == ([(18, 0.71)], False)
+
+
+def test_nickname_outside_the_restrict_set_is_ignored() -> None:
+    matches, swapped = _apply_nickname_fallback(
+        [(18, 0.375)], "FIAHHETTA", NICKNAMES, restrict_to_ids={18, 44}
+    )
+    assert (matches, swapped) == ([(18, 0.375)], False)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("HEEZINGL.33", "HEEZING"),  # rec-only fonde nome e livello
+        ("HEEZING+L.33", "HEEZING"),  # simbolo gender in mezzo
+        ("HEEZING L.33", "HEEZING"),
+        ("FIAMHETTASL.38", "FIAMHETTAS"),
+        ("WEEZING", "WEEZING"),  # niente livello, intatto
+        ("PORYGON2", "PORYGON2"),  # cifra vera, non un livello
+        ("L.33", "L.33"),  # solo livello: non svuotare la stringa
+    ],
+)
+def test_level_suffix_stripping(text: str, expected: str) -> None:
+    assert _strip_level_suffix(text) == expected

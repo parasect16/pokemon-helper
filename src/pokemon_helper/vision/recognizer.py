@@ -30,6 +30,9 @@ from pokemon_helper.vision.sprite_hash import compute_icon_phash, compute_phash
 
 # Pattern per riconoscere l'indicatore di livello: es. "L.33", "L 33", "Lv.33".
 _LEVEL_PATTERN = re.compile(r"^l\.?v?\.?\s*\d+$", re.IGNORECASE)
+# Indicatore di livello in coda a un nome, con o senza separatore: senza il
+# modello di detection RapidOCR restituisce nome e livello in un'unica riga.
+_LEVEL_SUFFIX = re.compile(r"[\s\W_]*l\.?v?\.?\s*\d{1,3}\s*$", re.IGNORECASE)
 # Pattern che ESTRAE il numero di livello (usato per popolare TeamSlot.level).
 _LEVEL_EXTRACT = re.compile(r"l\.?v?\.?\s*(\d+)", re.IGNORECASE)
 # Soglia di similarita per il match fuzzy sui nickname utente. L'OCR sui font
@@ -198,13 +201,15 @@ class Recognizer:
                 if candidates:
                     pokemon_id, confidence = candidates[0]
                     source = "name"
-            # Stadio 3: fuzzy sul nickname. Dopo il fuzzy specie di proposito:
-            # uno slot con nome di specie leggibile non deve essere rubato da
-            # un nickname simile presente in mappa.
-            if pokemon_id is None:
-                fuzzy_nick = _match_nickname(name_text or "", nickname_map)
-                if fuzzy_nick is not None:
-                    pokemon_id, confidence = fuzzy_nick
+            # Stadio 3: fuzzy sul nickname, che subentra solo se la specie non
+            # ha prodotto un match forte (vedi `_apply_nickname_fallback`).
+            if source != "nickname":
+                current = [(pokemon_id, confidence)] if pokemon_id is not None else []
+                matches, from_nickname = _apply_nickname_fallback(
+                    current, name_text or "", nickname_map
+                )
+                if from_nickname:
+                    pokemon_id, confidence = matches[0]
                     source = "nickname"
 
             # Fallback icona se il nome non ha prodotto nulla di affidabile.
@@ -289,10 +294,9 @@ class Recognizer:
                 )
                 if _id_allowed(pokemon_id, restrict_to_ids)
             ]
-        if not name_matches:
-            fuzzy_nick = _match_nickname(candidate_text or "", nickname_map)
-            if fuzzy_nick is not None and _id_allowed(fuzzy_nick[0], restrict_to_ids):
-                name_matches = [fuzzy_nick]
+        name_matches, _ = _apply_nickname_fallback(
+            name_matches, candidate_text or "", nickname_map, restrict_to_ids
+        )
 
         # Con restrict_to_ids alziamo max_distance e limit per aumentare la
         # probabilità che almeno un membro squadra sia fra i candidati.
@@ -357,6 +361,35 @@ def _id_allowed(pokemon_id: int, restrict_to_ids: set[int] | None) -> bool:
     return restrict_to_ids is None or pokemon_id in restrict_to_ids
 
 
+def _apply_nickname_fallback(
+    name_matches: list[tuple[int, float]],
+    text: str,
+    nickname_map: dict[str, int] | None,
+    restrict_to_ids: set[int] | None = None,
+) -> tuple[list[tuple[int, float]], bool]:
+    """Sostituisce un match di specie debole con un match nickname migliore.
+
+    La specie resta il primo stadio: se ha prodotto un match forte (score >=
+    `_NICKNAME_MIN_SIMILARITY`) vince e il nickname non viene nemmeno provato,
+    così uno slot con nome di specie leggibile non può essere rubato da un
+    nickname simile in mappa.
+
+    Sotto quella soglia però non c'è un vero match da proteggere: sull'HUD di
+    combattimento il fuzzy gira ristretto ai 6 della squadra con soglia 0.35,
+    dove `FIAHHETTA` (nickname di Charizard) agganciava `Pidgeot` a 0.375 e
+    impediva al nickname, che scora 0.78, di essere considerato.
+
+    Ritorna `(match, sostituito_da_nickname)`.
+    """
+    best = max((score for _, score in name_matches), default=0.0)
+    if best >= _NICKNAME_MIN_SIMILARITY:
+        return name_matches, False
+    nickname = _match_nickname(text, nickname_map)
+    if nickname is None or nickname[1] <= best or not _id_allowed(nickname[0], restrict_to_ids):
+        return name_matches, False
+    return [nickname], True
+
+
 def _match_nickname(
     text: str,
     nickname_map: dict[str, int] | None,
@@ -392,6 +425,11 @@ def _pick_name_text(ocr_results: list[OcrResult]) -> str | None:
     Scarta righe che sono un puro indicatore di livello (`L.33`, `Lv.5`, ...).
     Se restano più righe, ritorna la più lunga (di solito il nome è più lungo
     del livello dopo il filtro).
+
+    Sul HUD di combattimento nome e livello stanno sulla stessa riga e il
+    riconoscitore, senza il modello di detection a separarli, li restituisce
+    fusi (`HEEZINGL.33`). `_strip_level_suffix` taglia la coda `L.XX` prima
+    della pulizia finale.
     """
     filtered = [
         result
@@ -403,7 +441,18 @@ def _pick_name_text(ocr_results: list[OcrResult]) -> str | None:
     # Pulizia soft: rimuove eventuali code non alfabetiche (simboli gender ♀/♂,
     # backslash spuri) dalla stringa scelta.
     filtered.sort(key=lambda r: len(r.text), reverse=True)
-    return _strip_non_alpha_tail(filtered[0].text)
+    return _strip_non_alpha_tail(_strip_level_suffix(filtered[0].text))
+
+
+def _strip_level_suffix(text: str) -> str:
+    """Rimuove l'indicatore di livello attaccato in coda al nome.
+
+    `HEEZINGL.33` → `HEEZING`, `FIAMHETTASL.38` → `FIAMHETTAS`. Se togliendolo
+    non resta nulla il testo viene lasciato intatto: era un livello isolato,
+    non un nome con la coda.
+    """
+    stripped = _LEVEL_SUFFIX.sub("", text.strip())
+    return stripped if stripped.strip() else text
 
 
 def _strip_non_alpha_tail(text: str) -> str:

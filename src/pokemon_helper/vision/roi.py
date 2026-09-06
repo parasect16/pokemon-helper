@@ -124,28 +124,40 @@ class GameRois:
     team_menu: TeamMenuRois
 
 
+# Tutte le ROI di combattimento qui sotto sono state calibrate su cattura
+# 1119×768 quando `menu_offset_top` valeva ancora 30 px invece dei 52 reali.
+# La `game_area` usata come riferimento era quindi sbagliata (1107×738 a y=30
+# invece di 1074×716 a y=52) e le coordinate normalizzate ne hanno assorbito
+# l'errore: dopo il fix del chrome ogni box è finito ~20 px troppo in basso.
+# Il caso peggiore era `opponent_name`, alto appena 38 px, che tagliava a metà
+# il nome dell'avversario e leggeva la barra PS ("AECFAT\"S..").
+#
+# I valori attuali sono le vecchie coordinate riproiettate sulla `game_area`
+# vera: pixel_frame ricostruiti col chrome sbagliato, poi rinormalizzati con
+# quello giusto. Sono quindi indipendenti dalla dimensione della finestra —
+# non lo erano prima, perché incorporavano un offset in pixel assoluti.
 ROIS_FIRERED = GameRois(
     # --- Avversario (metà alta) ---
     # Nome + livello dell'avversario (solo la riga di testo, HP escluso).
-    # Misurato empiricamente su cattura 1119×768 di mGBA (game_area 1107×738,
-    # menu 30px). Range approx: y_pixel 145..185, x_pixel 40..470 nel game_area.
-    opponent_name=Roi(x=0.030, y=0.155, w=0.395, h=0.055),
+    # `h` allargato da 0.057 a 0.065: con il box stretto l'OCR leggeva
+    # "HEEZIHGL.33" (0.97), con questo "HEEZINGL.33" (1.00).
+    opponent_name=Roi(x=0.016, y=0.129, w=0.407, h=0.065),
     # Sprite avversario: metà alta destra. pHash è tollerante alle inclusioni
     # di sfondo, quindi il crop non deve essere perfettamente stretto.
-    opponent_sprite=Roi(x=0.470, y=0.088, w=0.410, h=0.348),
+    opponent_sprite=Roi(x=0.469, y=0.060, w=0.423, h=0.359),
     # Barra HP avversario: barra colorata dopo la label "PS".
-    opponent_hp_bar=Roi(x=0.146, y=0.222, w=0.250, h=0.028),
+    opponent_hp_bar=Roi(x=0.135, y=0.198, w=0.258, h=0.029),
     # --- Giocatore (metà bassa) ---
     # HUD del giocatore in basso-destra: riga nome+livello (esclude la barra
-    # HP che vive più in basso). Posizionamento fine dopo iterazioni con la
-    # cattura live: y più alta e box alto per catturare bene il testo.
-    player_name=Roi(x=0.545, y=0.478, w=0.400, h=0.082),
+    # HP che vive più in basso). Box alto, quindi tollerava lo sfasamento del
+    # chrome anche prima di questa correzione.
+    player_name=Roi(x=0.546, y=0.462, w=0.412, h=0.085),
     # Sprite posteriore del giocatore in basso-sinistra: allargato verso
     # destra rispetto alla prima calibrazione per includere la parte destra
     # dello sprite che sporgeva oltre il ROI iniziale.
-    player_sprite=Roi(x=0.090, y=0.470, w=0.360, h=0.310),
+    player_sprite=Roi(x=0.077, y=0.454, w=0.371, h=0.320),
     # Barra HP giocatore: barra colorata "PS ▬▬▬" (prima dei numeri assoluti).
-    player_hp_bar=Roi(x=0.635, y=0.605, w=0.260, h=0.028),
+    player_hp_bar=Roi(x=0.639, y=0.593, w=0.268, h=0.029),
     # --- Menu Pokemon ---
     # Layout Rosso Fuoco: slot 0 grande a sinistra (Pokemon "attivo"), slot 1-5
     # righe compatte a destra. `slot_areas` è tight sul nome, `slot_levels`
