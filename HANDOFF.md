@@ -9,10 +9,11 @@ Vedi [`PLAN.md`](PLAN.md) per roadmap, [`CLAUDE.md`](CLAUDE.md) per convenzioni.
 Tool desktop Windows. Affianca emulatore Pokemon Gen 1-5 con pannello sempre in primo piano. Funzionalità:
 
 - **Squadra manuale**: 6 slot nome + livello, generazione selezionabile. Persistenza in `%APPDATA%\pokemon-helper\state.json`.
-- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR nome + pHash sprite, in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione). Guardia `is_battle_screen` blocca l'update se la ROI HP avversario non ha pixel colore-HP (schermata non-battaglia → warning ⚠).
+- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR nome (il canale pHash sprite esiste ma in battaglia è inservibile, vedi §6), in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione). Guardia `is_battle_screen` blocca l'update se la ROI HP avversario non ha pixel colore-HP (schermata non-battaglia → warning ⚠).
 - **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR nome per ciascuno dei 6 slot con fuzzy match, livello letto cifra per cifra da `vision/level_reader.py`, sovrascrive `state.team`. Guard doppia: <3/6 slot leggibili o stesso pokemon_id in ≥2 slot → aggiornamento bloccato.
 - **Mappa nickname** (pulsante `🏷`): dialog per associare nickname custom (es. "FIAMMETTA") a un pokemon_id, usata sia dal riconoscimento squadra sia da quello del player in battaglia. Il nickname si scrive come appare nel gioco: il confronto è fuzzy e assorbe gli errori OCR. Persistita in `state.json`.
-- **OpponentPanel**: due card affiancate (player | avversario) con sprite Pokedex, nome, tipi, tabella efficacia difensiva colorata (Debolezze / Resistenze / Immune, neutri esclusi).
+- **OpponentPanel**: due card affiancate (player | avversario) con sprite Pokedex, nome, tipi, abilità e tabella efficacia difensiva colorata (Debolezze / Resistenze / Immune, neutri esclusi).
+- **Abilità**: l'efficacia tiene conto delle abilità che la modificano — contro un Gengar con Levitazione, Terra risulta `0×` e non `2×`. Quando il dataset ammette una sola abilità per quella generazione viene applicata da sola; con più candidati un menu a tendina permette di fissare quella vista in battaglia, e la scelta è persistita per specie. Il menu è evidenziato solo se l'ambiguità può davvero cambiare il verdetto. Tooltip con la descrizione dell'abilità in italiano.
 - **Auto-detect** (checkbox `Auto`, spento di default, persistito): polla la finestra dell'emulatore ogni 750 ms e aggiorna il pannello da solo all'inizio del combattimento, alla fine e a ogni cambio di Pokemon in campo (entrambi i lati). L'elenco Pokemon aperto a metà lotta non conta come "combattimento finito".
 - **Hotkey globale** (`Ctrl+Alt+P`): mostra / minimizza finestra.
 - **Feedback pulsanti**: ✓ verde su successo 10 s, ⚠ giallo su fallimento (motivo in tooltip).
@@ -28,6 +29,9 @@ pip install -e ".[dev,app,vision]"
 # Popola i dati la prima volta (idempotenti — si possono rilanciare).
 python scripts/build_dataset.py       # -> data/pokemon.sqlite (~2 MB)
 python scripts/build_sprite_index.py  # -> ~10k righe sprite_hashes
+
+# ATTENZIONE all'ordine: `build_dataset.py` ricrea il file da zero, quindi
+# cancella anche `sprite_hashes`. Se lo rilanci, rilancia anche l'indice.
 
 # Avvio applicazione.
 python -m pokemon_helper
@@ -47,6 +51,7 @@ src/pokemon_helper/
 
 scripts/
   build_dataset.py           # veekun/pokedex clone + parse → data/pokemon.sqlite
+                             # (ricrea il DB: poi va rilanciato build_sprite_index)
   build_sprite_index.py      # PokeAPI/sprites sparse clone + pHash → sprite_hashes
   capture_test.py            # cattura mGBA → data/capture-test.png
   roi_debug.py               # overlay ROI battaglia (mGBA + FRLG)
@@ -58,11 +63,13 @@ scripts/
   recognize_test.py          # end-to-end recognize opponent
   recognize_team_test.py     # end-to-end recognize squadra
   battle_watch_debug.py      # eventi F4 (ENTERED/LEFT/CHANGED) senza GUI
+
+.github/workflows/ci.yml     # ruff + pytest --cov su push e PR
   player_debug.py            # end-to-end recognize player (con crop + overlay)
   extract_roi_from_annotated.py  # bbox per colore da PNG annotato → coord Roi
 
 tests/
-  engine/ data/ ui/ vision/  # pytest, 213 test.
+  engine/ data/ ui/ vision/  # pytest, 280 test. engine+data al 100%, ui/ a 0.
 
 data/                        # gitignored (eccetto la struttura)
   vendor/pokedex/            # shallow clone veekun (CSV Pokedex)
@@ -73,8 +80,8 @@ data/                        # gitignored (eccetto la struttura)
 ## 4. Comandi utili
 
 ```powershell
-pytest -q                            # 213 test, tutti verdi
-pytest --cov                         # con coverage report (soglia 90% engine+data)
+pytest -q                            # 280 test, tutti verdi
+pytest --cov                         # coverage con floor 90% su engine+data (oggi 100%)
 ruff check .                         # lint
 ruff format .                        # format
 pre-commit run --all-files           # tutti gli hook (ruff + eol + ecc.)
@@ -93,6 +100,7 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 | F2   | ✅ done | Companion window nativa con chrome Windows, hotkey, persistenza. |
 | F3   | ✅ usable | mGBA + Rosso Fuoco. 19 sotto-step in `PLAN.md` §6. Su cattura live: 6/6 nomi e 6/6 livelli dal menu squadra, avversario e player riconosciuti in battaglia. |
 | F4   | ✅ done | Auto-detect via `BattleWatcher` + poll 750 ms. Interruttore "Auto", spento di default. Segue ingresso, uscita e cambi di Pokemon su entrambi i lati. |
+| F5   | ✅ done | Abilità che modificano l'efficacia (fuori dal piano originale). Vedi `PLAN.md` §6. |
 
 ## 6. Limitazioni note (da PLAN §7)
 
@@ -100,7 +108,11 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 - **Match icona menu Pokemon**: pHash/dhash rumorosi anche col color-key HSV. Oggi conta poco: l'OCR nome rec-only riconosce tutti gli slot, quindi il fallback icona non viene quasi mai raggiunto.
 - **Chrome mGBA hardcoded 52 px**: title bar + menu bar misurati sulla macchina utente (Win10 Pro DPI 100%). Su Win11 o DPI diverse serve auto-detect (scan prima riga teal del frame).
 - **ROI hardcoded**: solo FRLG a scala mGBA. Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi. Parzialmente coperto da `extract_roi_from_annotated.py` (offline).
+- **pHash sprite in combattimento**: inservibile. La cattura ha campo e cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la specie corretta non entra nei primi tre a nessun offset di ROI (Weezing a distanza 20-24 mentre specie sbagliate stanno a 14-16). Il verdetto regge interamente sul nome.
+- **Abilità ambigue**: molte specie ne ammettono più d'una e dallo sprite non si distinguono. Il filtro per generazione ne risolve circa metà in Gen 3, meno in Gen 5. Per il resto il pannello non applica nulla e segnala il dubbio, e l'abilità si fissa a mano dal menu sulla card.
+- **Abilità storiche**: veekun pubblica solo l'assegnazione corrente. `ABILITY_HISTORY_OVERRIDES` copre Gengar (che ha perso Levitazione in Gen 7); altri casi eventuali vanno aggiunti lì a mano.
 - **Ambiente**: F2/F3/F4 richiedono Windows nativo (COM + Windows Graphics Capture + hotkey Win32). Logica pura (`engine/`, `data/`) ovunque, anche WSL/Linux.
+- **CI mai eseguita**: il workflow c'è ma non è ancora girato su GitHub. Le due variabili headless (`QT_QPA_PLATFORM=offscreen`, `PYNPUT_BACKEND=dummy`) non erano verificabili da Windows; se il primo run fallisce, è lì che guardare.
 - **Nickname Pokemon**: il fuzzy sui nomi di specie non li riconosce. Fix via mappa utente `state.nicknames` (dialog 🏷), consultata sia da `recognize_team` sia da `recognize_player` (l'HUD di combattimento mostra il nickname, non la specie). Il confronto è fuzzy, quindi assorbe i tipici errori OCR: il nickname va scritto **come appare nel gioco**.
 
 ## 7. Prossimi step suggeriti
@@ -140,7 +152,7 @@ in poi sono estensioni, non completamento.
 
 ## 9. File di stato utente
 
-`%APPDATA%\pokemon-helper\state.json`: JSON con `generation`, `team[6]` (id + livello), `overlay_x`, `overlay_y`, `nicknames` (dict UPPERCASE → pokemon_id). Rigenerato al primo salvataggio se assente. Chiavi non riconosciute ignorate silenziosamente (es. vecchia `click_through`); `nicknames` mancante = dict vuoto (compat pre-F3.16).
+`%APPDATA%\pokemon-helper\state.json`: JSON con `generation`, `team[6]` (id + livello), `overlay_x`, `overlay_y`, `nicknames` (dict UPPERCASE → pokemon_id), `auto_detect` (bool), `abilities` (dict pokemon_id → identifier abilità fissata). Rigenerato al primo salvataggio se assente. Chiavi non riconosciute ignorate silenziosamente (es. vecchia `click_through`); chiavi mancanti prendono il default, quindi i file scritti da versioni precedenti restano leggibili.
 
 ## 10. Dove chiedere
 
