@@ -20,6 +20,23 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
+# Import apparentemente fuori posto, in realtà obbligatorio qui.
+#
+# `imagehash.phash` fa `import scipy.fftpack` *dentro* la funzione. Se quel
+# primo import avviene dopo che `windows_capture` ha inizializzato il proprio
+# runtime, caricare le DLL di scipy fa segfaultare la cattura successiva: il
+# processo muore senza traceback. Sequenza minima per riprodurlo:
+#
+#     cap.capture_frame(); imagehash.phash(img); cap.capture_frame()  # SIGSEGV
+#
+# Non dipende dal thread — succede anche con cattura e hash sempre sullo
+# stesso worker persistente. Anticipando l'import qui, scipy è già caricato
+# prima che qualunque cattura possa partire, perché per catturare bisogna per
+# forza importare questo modulo. Costa ~340 ms una tantum all'import.
+#
+# Se un giorno `sprite_hash` smettesse di usare imagehash, questo import può
+# sparire — ma va tolto verificando la sequenza qui sopra, non a occhio.
+import scipy.fftpack  # noqa: F401
 from PIL import Image
 from windows_capture import WindowsCapture
 
