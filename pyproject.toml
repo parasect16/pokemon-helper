@@ -32,6 +32,11 @@ app = [
 vision = [
     "Pillow>=10",
     "imagehash>=4.3",
+    # Arriva comunque come dipendenza di imagehash, ma `vision/capture.py` lo
+    # importa direttamente per forzarne il caricamento prima del runtime di
+    # cattura (vedi il commento lì): una dipendenza usata in modo esplicito va
+    # dichiarata.
+    "scipy>=1.11",
     "windows-capture>=1.4; sys_platform == 'win32'",
     # `rapidocr` (pacchetto moderno) + backend `onnxruntime`. Il vecchio
     # `rapidocr-onnxruntime` non ha wheel per Python 3.14.

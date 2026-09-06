@@ -32,6 +32,9 @@ _POKEMON_ROWS: tuple[tuple[int, str, str, str | None, int], ...] = (
     (82, "magneton", "Magneton", "Magneton", 1),
     (92, "gastly", "Gastly", "Gastly", 1),
     (152, "chikorita", "Chikorita", "Chikorita", 2),
+    # Senza nome italiano: nel dataset reale capita, e il fuzzy match deve
+    # cavarsela col solo nome inglese invece di sollevare.
+    (129, "magikarp", "Magikarp", None, 1),
 )
 
 # Sprite hash sintetici. La coppia (pokemon_id, generation, game, side) è
@@ -71,6 +74,8 @@ _TYPES_ROWS: tuple[tuple[int, int, int, str], ...] = (
     *((92, gen, 2, "poison") for gen in range(1, 6)),
     # Chikorita: grass, presente solo da Gen 2.
     *((152, gen, 1, "grass") for gen in range(2, 6)),
+    # Magikarp: water, stabile.
+    *((129, gen, 1, "water") for gen in range(1, 6)),
 )
 
 

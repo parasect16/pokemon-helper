@@ -347,3 +347,116 @@ def test_display_name_falls_back_to_english(repository: PokemonRepository) -> No
     ability = repository.get_abilities(81, 3)[0]
     assert ability.name_it is None
     assert ability.display_name == "Volt Absorb"
+
+
+# --------------------------------------------------- fuzzy match sui nomi
+
+
+def test_fuzzy_name_finds_an_exact_match(repository: PokemonRepository) -> None:
+    matches = repository.find_by_fuzzy_name("Bulbasaur", 1)
+    assert matches[0][0].id == 1
+    assert matches[0][1] == 1.0
+
+
+def test_fuzzy_name_is_case_and_space_insensitive(repository: PokemonRepository) -> None:
+    assert repository.find_by_fuzzy_name("  bulbasaur ", 1)[0][0].id == 1
+
+
+def test_fuzzy_name_tolerates_ocr_typos(repository: PokemonRepository) -> None:
+    """È il caso d'uso reale: RapidOCR sbaglia un carattere sui font pixel."""
+    matches = repository.find_by_fuzzy_name("GASTLV", 1)
+    assert matches[0][0].id == 92
+    assert 0.6 <= matches[0][1] < 1.0
+
+
+def test_fuzzy_name_respects_min_similarity(repository: PokemonRepository) -> None:
+    assert repository.find_by_fuzzy_name("GASTLV", 1, min_similarity=0.99) == []
+
+
+def test_fuzzy_name_filters_by_generation(repository: PokemonRepository) -> None:
+    """Chikorita esiste solo da Gen 2: cercarla in Gen 1 non deve trovarla."""
+    assert repository.find_by_fuzzy_name("Chikorita", 1) == []
+    assert repository.find_by_fuzzy_name("Chikorita", 2)[0][0].id == 152
+
+
+def test_fuzzy_name_orders_by_score_then_id(repository: PokemonRepository) -> None:
+    matches = repository.find_by_fuzzy_name("Magnemite", 2, min_similarity=0.5)
+    scores = [score for _, score in matches]
+    assert scores == sorted(scores, reverse=True)
+    assert matches[0][0].id == 81
+
+
+def test_fuzzy_name_caps_results_at_the_limit(repository: PokemonRepository) -> None:
+    assert len(repository.find_by_fuzzy_name("a", 5, min_similarity=0.0, limit=2)) == 2
+
+
+def test_fuzzy_name_on_empty_query(repository: PokemonRepository) -> None:
+    assert repository.find_by_fuzzy_name("   ", 1) == []
+
+
+def test_fuzzy_name_rejects_unsupported_generation(repository: PokemonRepository) -> None:
+    with pytest.raises(ValueError, match="unsupported generation"):
+        repository.find_by_fuzzy_name("Bulbasaur", 0)
+
+
+def test_fuzzy_name_matches_the_italian_name(repository: PokemonRepository) -> None:
+    """Lo score è il migliore fra nome inglese e italiano."""
+    assert repository.find_by_fuzzy_name("Bulbasaur", 1)[0][0].name_it == "Bulbasaur"
+
+
+# ---------------------------------------------------- path dello sprite
+
+
+def test_sprite_source_path_prefers_the_requested_game(
+    repository: PokemonRepository,
+) -> None:
+    path = repository.get_sprite_source_path(1, 1, side="front", preferred_game="red-blue")
+    assert path == "gen1/rb/1.png"
+
+
+def test_sprite_source_path_falls_back_to_any_game(repository: PokemonRepository) -> None:
+    """Gioco preferito assente: meglio uno sprite di un'altra versione che nessuno."""
+    path = repository.get_sprite_source_path(1, 1, side="front", preferred_game="yellow")
+    assert path == "gen1/rb/1.png"
+
+
+def test_sprite_source_path_without_a_preference(repository: PokemonRepository) -> None:
+    assert repository.get_sprite_source_path(1, 1) == "gen1/rb/1.png"
+
+
+def test_sprite_source_path_distinguishes_sides(repository: PokemonRepository) -> None:
+    assert repository.get_sprite_source_path(1, 1, side="back") == "gen1/rb/back/1.png"
+
+
+def test_sprite_source_path_distinguishes_generations(repository: PokemonRepository) -> None:
+    assert repository.get_sprite_source_path(1, 2) == "gen2/gold/1.png"
+
+
+def test_sprite_source_path_returns_none_when_missing(repository: PokemonRepository) -> None:
+    assert repository.get_sprite_source_path(152, 1) is None
+
+
+# ------------------------------------------------ filtro per lato dello sprite
+
+
+def test_find_by_sprite_hash_filters_by_side(repository: PokemonRepository) -> None:
+    """`sides` restringe la ricerca: il back di Bulbasaur non deve comparire."""
+    matches = repository.find_pokemon_by_sprite_hash(
+        "0000000000000001", 1, sides=("front",), max_distance=64
+    )
+    assert all(m.side == "front" for m in matches)
+
+
+def test_find_by_sprite_hash_accepts_several_sides(repository: PokemonRepository) -> None:
+    matches = repository.find_pokemon_by_sprite_hash(
+        "0000000000000000", 1, sides=("front", "back"), max_distance=64
+    )
+    assert {m.side for m in matches} <= {"front", "back"}
+    assert matches[0].pokemon_id == 1
+
+
+def test_fuzzy_name_works_without_an_italian_name(repository: PokemonRepository) -> None:
+    """Nel dataset reale `name_it` può mancare: si usa il solo nome inglese."""
+    matches = repository.find_by_fuzzy_name("Magikarp", 1)
+    assert matches[0][0].id == 129
+    assert matches[0][0].name_it is None
