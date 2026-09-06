@@ -124,11 +124,20 @@ def main() -> int:
     overlay.save(OUT_DIR / "team-menu-overlay.png")
     print(f"\n[overlay] {OUT_DIR / 'team-menu-overlay.png'}")
 
-    # Recognize completo per verdetto per slot.
+    # Recognize completo per verdetto per slot. La mappa nickname arriva dallo
+    # stato persistito: senza di essa il debug non riflette il comportamento
+    # dell'app, che la passa sempre.
+    from pokemon_helper.ui.state import StateStore, default_state_path
+
+    nicknames = StateStore(default_state_path()).load().nicknames
+    print(f"\n[nickname-map] {nicknames or 'vuota'}")
+
     print("\n=== recognize_team output ===")
     with PokemonRepository.open(DB_PATH) as repo:
         recognizer = Recognizer(repo, ocr)
-        results = recognizer.recognize_team(frame.image, layout, rois, generation)
+        results = recognizer.recognize_team(
+            frame.image, layout, rois, generation, nickname_map=nicknames
+        )
         for res in results:
             name = "-"
             if res.pokemon_id is not None:

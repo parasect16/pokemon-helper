@@ -79,11 +79,17 @@ def main() -> int:
     state = StateStore(default_state_path()).load()
     team_ids = {slot.pokemon_id for slot in state.team if slot is not None}
     print(f"[team-restrict] ids={sorted(team_ids) or 'nessuno (dataset intero)'}")
+    print(f"[nickname-map] {state.nicknames or 'vuota'}")
 
     with PokemonRepository.open(DB_PATH) as repo:
         recognizer = Recognizer(repo, ocr)
         result = recognizer.recognize_player(
-            frame.image, layout, rois, 3, restrict_to_ids=team_ids or None
+            frame.image,
+            layout,
+            rois,
+            3,
+            restrict_to_ids=team_ids or None,
+            nickname_map=state.nicknames,
         )
         if result is None:
             print("[recognize-player] NESSUN RISULTATO")
