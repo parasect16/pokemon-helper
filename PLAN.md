@@ -147,15 +147,24 @@ Sotto-fasi:
 - **F3.19 (fatto)** — Lettura del livello cifra per cifra, vedi F3.10.
 
 
-### F4 — Rilevamento automatico del combattimento (da fare)
+### F4 — Rilevamento automatico del combattimento (fatto)
 
-Rilevare lo stato di combattimento tramite template matching sulla barra dei punti salute avversaria, estrarre il Pokémon avversario e aggiornare il pannello con il confronto fra i sei Pokémon della squadra e l'avversario corrente. Da implementare dopo il consolidamento della F3.
+Il pannello si aggiorna da solo, senza premere hotkey. `vision/battle_watcher.py` tiene la memoria fra un frame e l'altro e traduce le osservazioni in transizioni — `ENTERED`, `LEFT`, `COMBATANTS_CHANGED` — mentre `ui.app._BattlePoller` fa girare il ciclo. Nessun template matching: `is_battle_screen` (F3.15) bastava già.
+
+Sotto-fasi:
+
+- **F4.1 (fatto)** — Polling periodico ogni 1500 ms. Il `QTimer` vive sul thread GUI ma non cattura: accoda un job al `_RecognizeWorker` esistente, perché `windows-capture` va usata sempre dallo stesso thread con l'apartment COM inizializzato. Effetto collaterale utile: i poll si serializzano con i riconoscimenti manuali, quindi due catture non si sovrappongono. Un poll più lento dell'intervallo salta il tick successivo invece di accumulare coda.
+- **F4.2 (fatto)** — `ENTERED` e `COMBATANTS_CHANGED` invocano `on_recognize`. L'isteresi a 2 osservazioni concordi evita i rimbalzi sulle dissolvenze e dà tempo agli sprite di finire di comparire prima che parta l'OCR.
+- **F4.3 (fatto)** — `LEFT` svuota il pannello e toglie l'evidenziazione dello slot attivo.
+- **F4.4 (fatto)** — Interruttore "Auto" in toolbar, spento di default e persistito in `state.json`. Mentre è attivo l'app cattura la finestra dell'emulatore, e quella resta una scelta dell'utente. Riattivandolo a lotta in corso il watcher si resetta, così viene comunque emesso `ENTERED`.
+- **F4.5 (fatto)** — Firma testuale per rilevare i cambi di Pokemon in campo. La prima versione confrontava il pHash dei riquadri nome: falsi positivi in continuazione, perché fra una cattura e l'altra il frame trasla di un paio di pixel e il pHash è invariante alla scala ma non alla traslazione (4 falsi positivi in 20 s a gioco fermo). Ora la firma è il testo OCR dei due riquadri nome, confrontati per similarità lato per lato: stesso nome riletto 0.91-0.96 anche con un carattere sbagliato, Pokemon diversi 0.40-0.46, soglia a 0.75. Un semplice aumento di livello sta a 0.92 e correttamente non conta come cambio. Copre entrambi i lati perché il cambio dell'avversario si vedrebbe comunque (il suo HUD sparisce durante l'animazione, quindi `LEFT` + `ENTERED`), mentre un cambio del giocatore non muove nulla nello stato di battaglia.
+- **F4.6 (fatto)** — Terza osservazione `None` = "non lo so", che mantiene lo stato. La produce `is_party_menu_screen`, che riconosce l'elenco Pokemon dallo sfondo teal (47% dell'area di gioco contro 0.1% in combattimento). Senza, aprire l'elenco per cambiare Pokemon svuotava il pannello a metà lotta.
 
 ## 7. Punti aperti
 
 - Emulatori da supportare per primi. Candidati: mGBA per Game Boy, Game Boy Color e Game Boy Advance; melonDS o DeSmuME per Nintendo DS. **Attuale**: solo mGBA con Rosso Fuoco (Gen 3 GBA).
 - Lingua del gioco per l'OCR: la lingua dell'interfaccia del gioco determina il dizionario di nomi da usare per il confronto. **Attuale**: fuzzy match su nomi IT + EN a prescindere dalla lingua del gioco.
-- Gestione delle abilità che modificano l'efficacia dei tipi, ad esempio Levitazione o Assorbivolt. Da valutare dopo la fase F1.
+- Gestione delle abilità che modificano l'efficacia dei tipi, ad esempio Levitazione o Assorbivolt. Ora è il punto aperto più rilevante per la correttezza: il calcolo guarda solo i tipi, quindi su un Gengar con Levitazione il tool consiglia una mossa di Terra e sbaglia. È l'unico caso in cui la risposta è errata anziché soltanto incompleta.
 - **Match icona menu**: pHash/dhash non raggiungono distanze basse anche con color-key HSV. Alternative: template matching su icone note, o accettare che il fallback icona resti un weak signal.
 - **Calibrazione ROI visuale**: le ROI attuali sono hardcoded per FRLG a scala mGBA con menu bar visibile. Un calibratore drag-a-rettangolo permetterebbe di supportare altri giochi/scaling con meno codice. Parzialmente coperto da `scripts/extract_roi_from_annotated.py` (offline via PNG annotato).
 - **Chrome mGBA hardcoded**: `LAYOUT_MGBA_GBA.menu_offset_top = 52` misurato sulla macchina utente (Win10 Pro DPI 100%). Su altre DPI/Windows 11 il valore può differire. Da auto-detect via scansione della prima riga teal del frame catturato. Nota: è l'unica costante in pixel assoluti del sistema ROI — tutto il resto è normalizzato e quindi indipendente dalla dimensione della finestra. Quando è cambiata da 30 a 52 ha sfasato di ~20 px tutte le ROI battaglia, calibrate prima del fix; sono state riproiettate sulla game area vera (commit `1f85b1e`).

@@ -13,6 +13,7 @@ Tool desktop Windows. Affianca emulatore Pokemon Gen 1-5 con pannello sempre in 
 - **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR nome per ciascuno dei 6 slot con fuzzy match, livello letto cifra per cifra da `vision/level_reader.py`, sovrascrive `state.team`. Guard doppia: <3/6 slot leggibili o stesso pokemon_id in ≥2 slot → aggiornamento bloccato.
 - **Mappa nickname** (pulsante `🏷`): dialog per associare nickname custom (es. "FIAMMETTA") a un pokemon_id, usata sia dal riconoscimento squadra sia da quello del player in battaglia. Il nickname si scrive come appare nel gioco: il confronto è fuzzy e assorbe gli errori OCR. Persistita in `state.json`.
 - **OpponentPanel**: due card affiancate (player | avversario) con sprite Pokedex, nome, tipi, tabella efficacia difensiva colorata (Debolezze / Resistenze / Immune, neutri esclusi).
+- **Auto-detect** (checkbox `Auto`, spento di default, persistito): polla la finestra dell'emulatore ogni 1500 ms e aggiorna il pannello da solo all'inizio del combattimento, alla fine e a ogni cambio di Pokemon in campo (entrambi i lati). L'elenco Pokemon aperto a metà lotta non conta come "combattimento finito".
 - **Hotkey globale** (`Ctrl+Alt+P`): mostra / minimizza finestra.
 - **Feedback pulsanti**: ✓ verde su successo 10 s, ⚠ giallo su fallimento (motivo in tooltip).
 
@@ -56,11 +57,12 @@ scripts/
   icon_debug.py              # top-K pHash icone per debug
   recognize_test.py          # end-to-end recognize opponent
   recognize_team_test.py     # end-to-end recognize squadra
+  battle_watch_debug.py      # eventi F4 (ENTERED/LEFT/CHANGED) senza GUI
   player_debug.py            # end-to-end recognize player (con crop + overlay)
   extract_roi_from_annotated.py  # bbox per colore da PNG annotato → coord Roi
 
 tests/
-  engine/ data/ ui/ vision/  # pytest, 172 test, 100% branch coverage engine+data.
+  engine/ data/ ui/ vision/  # pytest, 213 test.
 
 data/                        # gitignored (eccetto la struttura)
   vendor/pokedex/            # shallow clone veekun (CSV Pokedex)
@@ -71,7 +73,7 @@ data/                        # gitignored (eccetto la struttura)
 ## 4. Comandi utili
 
 ```powershell
-pytest -q                            # 172 test, tutti verdi
+pytest -q                            # 213 test, tutti verdi
 pytest --cov                         # con coverage report (soglia 90% engine+data)
 ruff check .                         # lint
 ruff format .                        # format
@@ -90,7 +92,7 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 | F1   | ✅ done | `EffectivenessEngine`, `compute_matchup`, 100% test. |
 | F2   | ✅ done | Companion window nativa con chrome Windows, hotkey, persistenza. |
 | F3   | ✅ usable | mGBA + Rosso Fuoco. 19 sotto-step in `PLAN.md` §6. Su cattura live: 6/6 nomi e 6/6 livelli dal menu squadra, avversario e player riconosciuti in battaglia. |
-| F4   | ⏳ da fare | Auto-detect combattimento via HP-bar template match. Metà del lavoro già fatta in `battle_detector.is_battle_screen`. |
+| F4   | ✅ done | Auto-detect via `BattleWatcher` + poll 1500 ms. Interruttore "Auto", spento di default. Segue ingresso, uscita e cambi di Pokemon su entrambi i lati. |
 
 ## 6. Limitazioni note (da PLAN §7)
 
@@ -105,11 +107,13 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 
 Ordinati per valore/costo:
 
-1. **F4 auto-detect combattimento**: template match su pattern distintivo schermata battaglia (barra HP, ombra sprite). Se detected, invoca `recognize_opponent` senza input utente. ~4h.
-2. **Calibratore ROI visuale**: dialog con canvas su screenshot, disegni rettangoli per (nome opp, sprite opp, HUD player, ecc.). Sblocca altri giochi/scaling senza toccare codice. ~4-6h.
-3. **ROI `player_sprite` / `player_hp_bar`**: ancora mal centrate anche dopo la riproiezione di `1f85b1e`, perché la loro calibrazione originale era sbagliata a prescindere dal chrome. Impatto basso (il pHash in battaglia è comunque inservibile), ~1h con una cattura di riferimento.
-4. **Altro emulatore / gioco**: aggiungere Cristallo (Gen 2 mGBA) o HeartGold (Gen 4 melonDS/DeSmuME). Serve ROI dedicate + preferred_game in `_preferred_game()`.
-5. **Test UI**: coverage componenti Qt a 0. Aggiungere test con `pytest-qt` per state binding di `TeamPanel` / `OpponentPanel`.
+1. **Coverage gate rosso**: `pytest --cov` fallisce a 84.79% contro il floor 90% in `pyproject.toml`. Non è una regressione recente — è così da `af5930f`, che ha aggiunto tre metodi di `PokemonRepository` mai testati (`find_by_fuzzy_name`, `get_sprite_source_path`, filtro `sides` di `find_pokemon_by_sprite_hash`). Da chiudere insieme alla CI, altrimenti il floor non lo applica nessuno. ~1-2h per entrambi.
+2. **Sessione di cattura persistente**: ogni poll apre e chiude una sessione Windows Graphics Capture, e il bordo che il sistema disegna attorno alla finestra lampeggia a ogni giro. Una sessione long-lived con callback lo renderebbe fisso e porterebbe la cattura da ~90 ms a ~0. ~2-3h.
+3. **Abilità che modificano l'efficacia** (Levitazione, Assorbivolt, Parafulmine): oggi il calcolo guarda solo i tipi, quindi su un Gengar con Levitazione il consiglio è sbagliato. È l'unico punto in cui il tool può dare una risposta *errata* anziché incompleta. Estende `EffectivenessEngine` con un secondo layer.
+4. **Calibratore ROI visuale**: dialog con canvas su screenshot, disegni rettangoli per (nome opp, sprite opp, HUD player, ecc.). Sblocca altri giochi/scaling senza toccare codice. ~4-6h.
+5. **Altro emulatore / gioco**: aggiungere Cristallo (Gen 2 mGBA) o HeartGold (Gen 4 melonDS/DeSmuME). Serve ROI dedicate + preferred_game in `_preferred_game()`.
+6. **Test UI**: coverage componenti Qt a 0, ed è cresciuto parecchio con F4 (`_BattlePoller`, wiring del watcher, `fit_height`). `pytest-qt` per state binding di `TeamPanel` / `OpponentPanel`.
+7. **ROI `player_sprite` / `player_hp_bar`**: ancora mal centrate anche dopo la riproiezione di `1f85b1e`, perché la loro calibrazione originale era sbagliata a prescindere dal chrome. Impatto basso (il pHash in battaglia è comunque inservibile), ~1h con una cattura di riferimento.
 
 ## 8. Convenzioni rapide
 

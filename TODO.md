@@ -30,15 +30,22 @@ Convenzioni:
   visualizzato** (badge di stato al suo posto) — `read_level` ritorna `None`
   e lo slot conserva il livello precedente.
 
-## Da fare — F4 (prossima fase)
+## Fatto — F4
 
-- `[ ]` **F4.1** Template matching barra HP avversario → rileva stato "in
-  combattimento". Frame refresh periodico (es. ogni 500 ms su thread worker,
-  riusa `_RecognizeWorker`).
-- `[ ]` **F4.2** Auto-invoke `recognize_opponent` quando template match
-  detecta transizione → "in battaglia".
-- `[ ]` **F4.3** Auto-clear opponent quando template match detecta
-  transizione → "fuori battaglia".
+- `[x]` **F4 completa** (commit `265a4d1`, `00ec1b7`, `bb6c875`). Interruttore
+  "Auto" in toolbar, spento di default. `BattleWatcher` + `_BattlePoller`,
+  poll ogni 1500 ms sul worker esistente. Nessun template matching servito:
+  `is_battle_screen` bastava. Dettaglio delle sotto-fasi in `PLAN.md` §6.
+  Verificato sul vivo: ingresso, uscita, cambio Pokemon da entrambi i lati,
+  elenco Pokemon aperto a metà lotta.
+
+- `[ ]` **Sessione di cattura persistente** (~2-3h). Ogni poll apre e chiude
+  una sessione Windows Graphics Capture e il sistema disegna un bordo attorno
+  alla finestra: il bordo lampeggia a ogni poll. Passare da 500 a 1500 ms lo
+  ha reso più discreto ma non l'ha eliminato. Fix vero: una sessione
+  long-lived con callback che tiene l'ultimo frame, come già ipotizzato nel
+  docstring di `capture.py`. Il bordo resterebbe fisso invece di lampeggiare,
+  e la cattura scenderebbe da ~90 ms a ~0.
 
 ## Da fare — polish / feature
 
