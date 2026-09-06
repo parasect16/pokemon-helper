@@ -229,7 +229,7 @@ class OpponentPanel(QWidget):
             ability = candidates[0]
             label = QLabel(f"Abilità: {ability.display_name}", parent)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("color: #b8b8c8; font-size: 11px;")
+            label.setStyleSheet("color: #d6d6e2; font-size: 12px;")
             if ability.description:
                 label.setToolTip(ability.description)
             return label
@@ -248,14 +248,14 @@ class OpponentPanel(QWidget):
                 0,
             )
         )
-        box.setStyleSheet("font-size: 11px;")
+        box.setStyleSheet("font-size: 12px;")
         # Segnala che il profilo mostrato può essere sbagliato: senza questo
         # l'utente non ha modo di sapere che una delle abilità possibili
         # cambierebbe il verdetto.
         unknown = uncertain_abilities(applied, candidates, generation)
         if unknown:
             names = ", ".join(a.display_name for a in unknown)
-            box.setStyleSheet("font-size: 11px; border: 1px solid #e0c060;")
+            box.setStyleSheet("font-size: 12px; border: 1px solid #e0c060;")
             box.setItemData(
                 0,
                 f"Non applicata: cambierebbero l'efficacia {names}",

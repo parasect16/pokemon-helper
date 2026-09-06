@@ -110,6 +110,19 @@ class TeamPanel(QWidget):
                 selection-background-color: #40405a;
                 border: 1px solid #4a4a5f;
             }
+            /* Senza questa regola i tooltip usano la palette di sistema:
+               testo grigio su fondo chiaro, illeggibile sopra un pannello
+               scuro. Le descrizioni delle abilità sono frasi intere, quindi
+               servono anche padding e una larghezza massima che mandi a capo
+               invece di stendere una riga lunghissima. */
+            QToolTip {
+                background-color: #202030;
+                color: #F2F2F7;
+                border: 1px solid #6a6a85;
+                border-radius: 4px;
+                padding: 6px 8px;
+                font-size: 12px;
+            }
             """
         )
 
