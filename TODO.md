@@ -18,14 +18,17 @@ Convenzioni:
   Prossimo: template matching diretto su icone note (per game) o pre-crop
   più aggressivo riquadro icona (rimuovere anche Pokeball sinistra).
 
-- `[~]` **F3.10 — detection livello `L.XX` team menu**
-  ROI dedicate + preprocessing `high_contrast=True` + upscale x4 su
-  RapidOCR, più regex fallback `_extract_level` che gestisce `137` → 37.
-  **Limite**: solo alcuni slot (Dugtrio nel test) danno il numero. Font
-  pixel FRLG troppo piccolo/particolare per RapidOCR.
-  Fallback: preserva livello precedente per slot, editabile via pulsante `…`.
-  Prossimo: template matching per digit (10 template per game, match a
-  scorrimento su ROI).
+- `[x]` **F3.10 — detection livello `L.XX` team menu** (commit `ebc7a58`).
+  Risolto senza template matching. `vision/level_reader.py` binarizza,
+  segmenta le colonne di inchiostro (una per cifra: font a larghezza fissa,
+  cifre mai attaccate) e legge **una cifra alla volta** ingrandita e con
+  margine bianco attorno. Il margine è ciò che ha risolto: senza, confidenza
+  0.26-0.55 e valori sbagliati; con, 1.00 su tutte le cifre.
+  La causa non era il modello OCR ma la scala non intera di mGBA (4.26x),
+  che sfuma i bordi del font pixel in grigio.
+  Vincolo di gioco: con un'alterazione di stato il livello **non è
+  visualizzato** (badge di stato al suo posto) — `read_level` ritorna `None`
+  e lo slot conserva il livello precedente.
 
 ## Da fare — F4 (prossima fase)
 
@@ -38,6 +41,23 @@ Convenzioni:
   transizione → "fuori battaglia".
 
 ## Da fare — polish / feature
+
+- `[ ]` **ROI `player_sprite` e `player_hp_bar` ancora storte**. La
+  riproiezione di `1f85b1e` ha corretto la componente chrome, ma la
+  calibrazione originale di queste due era sbagliata di suo: nell'overlay
+  `player_sprite` taglia la testa dello sprite e include il box messaggi,
+  `player_hp_bar` cade sotto la barra verde sopra i numeri PS. Nessun codice
+  usa `player_hp_bar` oggi (solo `roi_debug.py` la disegna), quindi è
+  innocua; `player_sprite` degrada solo il canale pHash, che in battaglia è
+  già inutilizzabile (voce sotto).
+
+- `[!]` **pHash sprite inutilizzabile in battaglia**. La cattura ha campo e
+  cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la
+  specie corretta non entra nei primi 3 a nessun offset di ROI (Weezing a
+  distanza 20-24 mentre specie sbagliate stanno a 14-16). Il verdetto regge
+  interamente sul nome. Per recuperare il canale servirebbe segmentare il
+  soggetto dallo sfondo prima del hash (il fondo di battaglia è a bande di
+  colore piatte, quindi un flood-fill dai bordi è plausibile).
 
 - `[ ]` **Calibratore ROI visuale** (~4-6h). Dialog con canvas su screenshot,
   utente disegna rettangoli per (nome opp, sprite opp, HUD player, ecc.).
