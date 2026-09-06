@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 
 from PIL import Image
 
@@ -31,6 +32,10 @@ from pokemon_helper.vision.sprite_hash import compute_icon_phash, compute_phash
 _LEVEL_PATTERN = re.compile(r"^l\.?v?\.?\s*\d+$", re.IGNORECASE)
 # Pattern che ESTRAE il numero di livello (usato per popolare TeamSlot.level).
 _LEVEL_EXTRACT = re.compile(r"l\.?v?\.?\s*(\d+)", re.IGNORECASE)
+# Soglia di similarita per il match fuzzy sui nickname utente. L'OCR sui font
+# pixel sbaglia 1-2 caratteri (es. "FIAMMETTA" letto "FIAHHETTA", ratio 0.89),
+# quindi il lookup esatto sulla mappa non basta.
+_NICKNAME_MIN_SIMILARITY = 0.72
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +103,7 @@ class Recognizer:
         generation: int,
         *,
         restrict_to_ids: set[int] | None = None,
+        nickname_map: dict[str, int] | None = None,
     ) -> Recognition | None:
         """Riconosce il Pokemon del giocatore (back sprite + HUD basso-dx).
 
@@ -105,6 +111,11 @@ class Recognizer:
         match pHash sullo sprite vengono filtrati a quel set. Utile per
         vincolare il player attivo ai soli 6 membri della squadra, che è
         quello che deve essere per definizione.
+
+        `nickname_map`: l'HUD del giocatore mostra il nickname, non il nome
+        di specie, quindi il fuzzy sui nomi di specie fallisce su ogni
+        Pokemon rinominato. L'avversario non ha bisogno della mappa: gli
+        allenatori non danno nickname ai propri Pokemon.
         """
         return self._recognize(
             frame,
@@ -113,6 +124,7 @@ class Recognizer:
             sprite_roi=rois.player_sprite,
             generation=generation,
             restrict_to_ids=restrict_to_ids,
+            nickname_map=nickname_map,
         )
 
     def recognize_team(
@@ -167,12 +179,13 @@ class Recognizer:
             pokemon_id: int | None = None
             confidence = 0.0
             source = "none"
-            if name_text and nickname_map:
-                mapped = nickname_map.get(name_text.strip().upper())
-                if mapped is not None:
-                    pokemon_id = mapped
-                    confidence = 1.0
-                    source = "nickname"
+            # Stadio 1: nickname esatto. Ha priorita su tutto: se l'utente ha
+            # mappato quella stringa, l'intento e' esplicito.
+            exact = _match_nickname(name_text or "", nickname_map, min_similarity=1.0)
+            if exact is not None:
+                pokemon_id, confidence = exact
+                source = "nickname"
+            # Stadio 2: fuzzy sul nome di specie (il caso comune, nome default).
             if pokemon_id is None and name_text:
                 candidates = self._repo.find_by_fuzzy_name(
                     name_text, generation, min_similarity=min_similarity, limit=1
@@ -182,6 +195,14 @@ class Recognizer:
                     pokemon_id = pokemon.id
                     confidence = score
                     source = "name"
+            # Stadio 3: fuzzy sul nickname. Dopo il fuzzy specie di proposito:
+            # uno slot con nome di specie leggibile non deve essere rubato da
+            # un nickname simile presente in mappa.
+            if pokemon_id is None:
+                fuzzy_nick = _match_nickname(name_text or "", nickname_map)
+                if fuzzy_nick is not None:
+                    pokemon_id, confidence = fuzzy_nick
+                    source = "nickname"
 
             # Fallback icona se il nome non ha prodotto nulla di affidabile.
             if pokemon_id is None:
@@ -224,12 +245,17 @@ class Recognizer:
         sprite_roi,
         generation: int,
         restrict_to_ids: set[int] | None = None,
+        nickname_map: dict[str, int] | None = None,
     ) -> Recognition | None:
         """Nucleo condiviso: OCR nome + pHash sprite → combina.
 
         `restrict_to_ids`: filtro post-query sui candidati (nome + pHash) per
         limitare il risultato a un insieme di specie noto (es. i 6 membri
         della squadra corrente).
+
+        `nickname_map`: se il testo OCR corrisponde a un nickname mappato, il
+        match entra in `name_matches` come se venisse dal fuzzy sui nomi, così
+        lo sprite può ancora confermarlo (`source='both'`).
         """
         game_area = compute_game_area(frame.width, frame.height, layout)
         name_crop = frame.crop(roi_to_pixels(name_roi, game_area).as_crop_box())
@@ -240,7 +266,13 @@ class Recognizer:
         ocr_results = self._ocr.recognize(name_crop)
         candidate_text = _pick_name_text(ocr_results)
         name_matches: list[tuple[int, float]] = []
-        if candidate_text:
+        # Stessi tre stadi di `recognize_team`: nickname esatto, fuzzy specie,
+        # fuzzy nickname. Il match nickname viene iniettato in `name_matches`
+        # per non duplicare la politica di fusione di `_combine`.
+        exact_nick = _match_nickname(candidate_text or "", nickname_map, min_similarity=1.0)
+        if exact_nick is not None and _id_allowed(exact_nick[0], restrict_to_ids):
+            name_matches = [exact_nick]
+        if not name_matches and candidate_text:
             fuzzy_limit = 20 if restrict_to_ids else 5
             fuzzy_min = 0.35 if restrict_to_ids else 0.55
             name_matches = [
@@ -251,8 +283,12 @@ class Recognizer:
                     min_similarity=fuzzy_min,
                     limit=fuzzy_limit,
                 )
-                if restrict_to_ids is None or pokemon.id in restrict_to_ids
+                if _id_allowed(pokemon.id, restrict_to_ids)
             ]
+        if not name_matches:
+            fuzzy_nick = _match_nickname(candidate_text or "", nickname_map)
+            if fuzzy_nick is not None and _id_allowed(fuzzy_nick[0], restrict_to_ids):
+                name_matches = [fuzzy_nick]
 
         # Con restrict_to_ids alziamo max_distance e limit per aumentare la
         # probabilità che almeno un membro squadra sia fra i candidati.
@@ -265,7 +301,7 @@ class Recognizer:
         sprite_pairs: list[tuple[int, int]] = [
             (m.pokemon_id, m.distance)
             for m in sprite_matches
-            if restrict_to_ids is None or m.pokemon_id in restrict_to_ids
+            if _id_allowed(m.pokemon_id, restrict_to_ids)
         ]
 
         debug = {
@@ -275,6 +311,40 @@ class Recognizer:
         }
 
         return _combine(name_matches, sprite_pairs, debug, restricted=restrict_to_ids is not None)
+
+
+def _id_allowed(pokemon_id: int, restrict_to_ids: set[int] | None) -> bool:
+    """Vero se `pokemon_id` è ammesso dal filtro (nessun filtro = tutto ammesso)."""
+    return restrict_to_ids is None or pokemon_id in restrict_to_ids
+
+
+def _match_nickname(
+    text: str,
+    nickname_map: dict[str, int] | None,
+    *,
+    min_similarity: float = _NICKNAME_MIN_SIMILARITY,
+) -> tuple[int, float] | None:
+    """Cerca `text` fra le chiavi di `nickname_map`, tollerando errori OCR.
+
+    Ritorna `(pokemon_id, score)` del miglior match con score >=
+    `min_similarity`, altrimenti `None`. Con `min_similarity=1.0` il
+    comportamento degenera nel lookup esatto (ratio 1.0 = stringhe uguali),
+    usato come primo stadio prima del fuzzy sui nomi di specie.
+
+    A parita di score vince il nickname alfabeticamente minore, per rendere
+    l'esito deterministico.
+    """
+    if not text or not nickname_map:
+        return None
+    needle = text.strip().upper()
+    if not needle:
+        return None
+    best: tuple[int, float] | None = None
+    for nickname, pokemon_id in sorted(nickname_map.items()):
+        score = SequenceMatcher(None, needle, nickname.strip().upper()).ratio()
+        if score >= min_similarity and (best is None or score > best[1]):
+            best = (pokemon_id, score)
+    return best
 
 
 def _pick_name_text(ocr_results: list[OcrResult]) -> str | None:

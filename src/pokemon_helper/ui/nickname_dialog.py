@@ -1,11 +1,15 @@
-"""Dialog per gestire la mappa `nickname OCR → pokemon_id`.
+"""Dialog per gestire la mappa `nickname → pokemon_id`.
 
 Uso: da `TeamPanel` con un pulsante toolbar. Il dialog espone:
 
 - tabella `nickname | species` con le entry correnti;
 - pulsante "Aggiungi" che apre `AddPokemonDialog` per scegliere la specie e
-  chiede il nickname (uppercase, come letto dall'OCR);
+  chiede il nickname come appare nel gioco (normalizzato uppercase);
 - pulsante "Rimuovi" per la riga selezionata.
+
+Il nickname va digitato come lo mostra il gioco, non come lo legge l'OCR: il
+confronto lato `Recognizer` è fuzzy (`_match_nickname`), quindi assorbe gli
+errori tipici sui font pixel (es. "FIAMMETTA" letto "FIAHHETTA").
 
 Alla chiusura ritorna il dict aggiornato via `nicknames()`. Il chiamante
 si occupa di sostituire `state.nicknames` e persistere.
@@ -89,7 +93,7 @@ class NicknameDialog(QDialog):
         nickname, ok = QInputDialog.getText(
             self,
             "Nickname",
-            "Testo esatto letto dall'OCR (case-insensitive):",
+            "Nickname come appare nel gioco (case-insensitive):",
         )
         if not ok:
             return

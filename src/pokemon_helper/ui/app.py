@@ -276,6 +276,7 @@ def _init_recognize_hotkey(
                     rois,
                     state.generation,
                     restrict_to_ids=team_ids or None,
+                    nickname_map=state.nicknames,
                 )
 
             if opp is None or opp.confidence < min_confidence:
