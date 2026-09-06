@@ -87,7 +87,9 @@ TEAM_SIZE = 6
 class TeamMenuRois:
     """ROI degli slot squadra nella schermata elenco Pokemon.
 
-    - `slot_areas`: 6 rettangoli che coprono nome + livello di ciascun slot.
+    - `slot_areas`: 6 rettangoli tight sul solo nome di ciascun slot. Fino
+      alla ricalibrazione F3.14 coprivano anche la riga del livello; ora no,
+      e `slot_levels` è l'unica sorgente per il numero.
     - `slot_icons`: 6 rettangoli sulle mini icone del menu (fallback quando
       l'OCR nome non trova match — es. nickname personalizzati).
     - `slot_levels`: 6 rettangoli tight sul solo indicatore di livello
@@ -146,8 +148,8 @@ ROIS_FIRERED = GameRois(
     player_hp_bar=Roi(x=0.635, y=0.605, w=0.260, h=0.028),
     # --- Menu Pokemon ---
     # Layout Rosso Fuoco: slot 0 grande a sinistra (Pokemon "attivo"), slot 1-5
-    # righe compatte a destra. Ciascun ROI comprende sia il nome sia la riga
-    # del livello: `_pick_name_text` filtra la riga "L.XX" già oggi.
+    # righe compatte a destra. `slot_areas` è tight sul nome, `slot_levels`
+    # sul solo "L.XX": i due box non si sovrappongono.
     # Coord estratte via `scripts/extract_roi_from_annotated.py` da immagine
     # annotata a mano dall'utente (magenta=nome, ciano=icona, giallo=livello).
     team_menu=TeamMenuRois(

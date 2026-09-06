@@ -62,6 +62,7 @@ class OcrEngine:
         *,
         upscale: int = 1,
         high_contrast: bool = False,
+        detect: bool = False,
     ) -> list[OcrResult]:
         """Riconosce tutte le righe di testo presenti in `image`.
 
@@ -71,6 +72,18 @@ class OcrEngine:
         - `high_contrast=True` converte in grayscale + auto-contrast +
           invert (se lo sfondo è più scuro del testo). Utile per il livello
           `L.XX` bianco su blu del menu Pokemon.
+        - `detect=False` (default) salta il modello di detection e manda il
+          crop direttamente al riconoscitore. Tutti i nostri crop vengono da
+          una ROI già tight sul testo, quindi localizzarlo di nuovo è lavoro
+          sprecato: misurato su una schermata squadra FRLG, 4723 ms contro
+          51 ms per i 6 nomi (93x), e la detection *perdeva* i nomi corti
+          (`GLOOM` letto come vuoto). Se il rec da solo non produce nulla si
+          ricade sulla pipeline completa: copre il caso di ROI disallineata,
+          dove localizzare il testo serve davvero.
+
+        Nota: i flag `use_det`/`use_cls` restano appiccicati all'istanza
+        RapidOCR dopo una chiamata, quindi vanno passati espliciti ogni volta
+        o una chiamata rec-only silenzia la detection per tutte le successive.
         """
         rgb = image.convert("RGB")
         if high_contrast:
@@ -89,8 +102,10 @@ class OcrEngine:
         # RapidOCR 3.x ritorna un `RapidOCROutput` con attributi `txts` e
         # `scores`; le API più vecchie ritornavano una tupla o una lista di
         # liste. Gestiamo entrambe le forme.
-        raw = engine(array)
-        return list(_iter_results(raw))
+        results = list(_iter_results(engine(array, **_engine_flags(detect))))
+        if not results and not detect:
+            results = list(_iter_results(engine(array, **_engine_flags(True))))
+        return results
 
     def best_text(self, image: Image.Image, *, upscale: int = 1) -> OcrResult | None:
         """Restituisce la riga con confidenza più alta, o `None` se vuota."""
@@ -98,6 +113,15 @@ class OcrEngine:
         if not results:
             return None
         return max(results, key=lambda r: r.confidence)
+
+
+def _engine_flags(detect: bool) -> dict[str, bool]:
+    """Flag da passare a ogni chiamata RapidOCR.
+
+    Sempre espliciti: l'istanza ricorda i flag dell'ultima chiamata, quindi
+    ometterli farebbe ereditare la configurazione precedente.
+    """
+    return {"use_det": detect, "use_cls": detect, "use_rec": True}
 
 
 def _iter_results(raw: object):

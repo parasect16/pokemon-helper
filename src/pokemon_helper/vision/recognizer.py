@@ -37,6 +37,11 @@ _LEVEL_EXTRACT = re.compile(r"l\.?v?\.?\s*(\d+)", re.IGNORECASE)
 # quindi il lookup esatto sulla mappa non basta.
 _NICKNAME_MIN_SIMILARITY = 0.72
 
+# Cifre che l'OCR produce al posto di lettere sui font pixel. Applicata solo
+# come secondo tentativo, quando il testo grezzo non ha prodotto match: i nomi
+# con cifra legittima (Porygon2) matchano al primo giro e non passano di qui.
+_OCR_DIGIT_TO_LETTER = str.maketrans({"0": "O", "1": "I", "2": "Z", "5": "S", "8": "B"})
+
 
 @dataclass(frozen=True, slots=True)
 class Recognition:
@@ -187,13 +192,11 @@ class Recognizer:
                 source = "nickname"
             # Stadio 2: fuzzy sul nome di specie (il caso comune, nome default).
             if pokemon_id is None and name_text:
-                candidates = self._repo.find_by_fuzzy_name(
-                    name_text, generation, min_similarity=min_similarity, limit=1
+                candidates = _fuzzy_species(
+                    self._repo, name_text, generation, min_similarity=min_similarity, limit=1
                 )
                 if candidates:
-                    pokemon, score = candidates[0]
-                    pokemon_id = pokemon.id
-                    confidence = score
+                    pokemon_id, confidence = candidates[0]
                     source = "name"
             # Stadio 3: fuzzy sul nickname. Dopo il fuzzy specie di proposito:
             # uno slot con nome di specie leggibile non deve essere rubato da
@@ -276,14 +279,15 @@ class Recognizer:
             fuzzy_limit = 20 if restrict_to_ids else 5
             fuzzy_min = 0.35 if restrict_to_ids else 0.55
             name_matches = [
-                (pokemon.id, score)
-                for pokemon, score in self._repo.find_by_fuzzy_name(
+                (pokemon_id, score)
+                for pokemon_id, score in _fuzzy_species(
+                    self._repo,
                     candidate_text,
                     generation,
                     min_similarity=fuzzy_min,
                     limit=fuzzy_limit,
                 )
-                if _id_allowed(pokemon.id, restrict_to_ids)
+                if _id_allowed(pokemon_id, restrict_to_ids)
             ]
         if not name_matches:
             fuzzy_nick = _match_nickname(candidate_text or "", nickname_map)
@@ -311,6 +315,41 @@ class Recognizer:
         }
 
         return _combine(name_matches, sprite_pairs, debug, restricted=restrict_to_ids is not None)
+
+
+def _fuzzy_species(
+    repo: PokemonRepository,
+    text: str,
+    generation: int,
+    *,
+    min_similarity: float,
+    limit: int,
+) -> list[tuple[int, float]]:
+    """Fuzzy match sui nomi di specie, con un secondo giro sulle cifre OCR.
+
+    Primo tentativo sul testo grezzo. Se non produce nulla, riprova sul testo
+    con le cifre rimappate a lettere (`_OCR_DIGIT_TO_LETTER`): i nomi Pokemon
+    di Gen 1-5 sono quasi sempre alfabetici, quindi una cifra nel mezzo è di
+    norma un errore dell'OCR. Il secondo giro parte solo dopo il fallimento
+    del primo per non danneggiare i nomi con cifra vera (Porygon2).
+    """
+    matches = [
+        (pokemon.id, score)
+        for pokemon, score in repo.find_by_fuzzy_name(
+            text, generation, min_similarity=min_similarity, limit=limit
+        )
+    ]
+    if matches:
+        return matches
+    normalized = text.translate(_OCR_DIGIT_TO_LETTER)
+    if normalized == text:
+        return []
+    return [
+        (pokemon.id, score)
+        for pokemon, score in repo.find_by_fuzzy_name(
+            normalized, generation, min_similarity=min_similarity, limit=limit
+        )
+    ]
 
 
 def _id_allowed(pokemon_id: int, restrict_to_ids: set[int] | None) -> bool:

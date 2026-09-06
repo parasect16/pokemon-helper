@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from pokemon_helper.vision.recognizer import _id_allowed, _match_nickname
+from pokemon_helper.vision.recognizer import _fuzzy_species, _id_allowed, _match_nickname
 
 # Charizard = 6, Pikachu = 25, Gloom = 44.
 NICKNAMES = {"FIAMMETTA": 6, "SPARKY": 25}
@@ -72,3 +72,56 @@ def test_id_allowed_without_filter() -> None:
 def test_id_allowed_with_filter() -> None:
     assert _id_allowed(6, {6, 25}) is True
     assert _id_allowed(44, {6, 25}) is False
+
+
+class _FakeRepo:
+    """Repo minimo: risponde solo a `find_by_fuzzy_name` da un dizionario."""
+
+    def __init__(self, by_query: dict[str, list[tuple[int, float]]]) -> None:
+        self._by_query = by_query
+        self.queries: list[str] = []
+
+    def find_by_fuzzy_name(self, query, generation, *, min_similarity, limit):
+        self.queries.append(query)
+        return [(_FakePokemon(pid), score) for pid, score in self._by_query.get(query, [])]
+
+
+class _FakePokemon:
+    def __init__(self, pokemon_id: int) -> None:
+        self.id = pokemon_id
+
+
+def _fuzzy(repo, text):
+    return _fuzzy_species(repo, text, 3, min_similarity=0.55, limit=1)
+
+
+def test_raw_text_matches_without_second_pass() -> None:
+    repo = _FakeRepo({"GLOOH": [(44, 0.8)]})
+    assert _fuzzy(repo, "GLOOH") == [(44, 0.8)]
+    assert repo.queries == ["GLOOH"]
+
+
+def test_digit_normalization_runs_only_after_a_miss() -> None:
+    """`P1DGEOT` non matcha grezzo; il secondo giro prova `PIDGEOT`."""
+    repo = _FakeRepo({"PIDGEOT": [(18, 0.9)]})
+    assert _fuzzy(repo, "P1DGEOT") == [(18, 0.9)]
+    assert repo.queries == ["P1DGEOT", "PIDGEOT"]
+
+
+def test_legit_digit_name_is_not_rewritten() -> None:
+    """Porygon2 matcha al primo giro, quindi la rimappatura non lo tocca."""
+    repo = _FakeRepo({"PORYGON2": [(233, 1.0)]})
+    assert _fuzzy(repo, "PORYGON2") == [(233, 1.0)]
+    assert repo.queries == ["PORYGON2"]
+
+
+def test_no_second_pass_when_text_has_no_digits() -> None:
+    repo = _FakeRepo({})
+    assert _fuzzy(repo, "ZZZZZ") == []
+    assert repo.queries == ["ZZZZZ"]
+
+
+def test_second_pass_can_also_miss() -> None:
+    repo = _FakeRepo({})
+    assert _fuzzy(repo, "ZZ1ZZ") == []
+    assert repo.queries == ["ZZ1ZZ", "ZZIZZ"]
