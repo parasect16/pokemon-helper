@@ -105,15 +105,31 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 
 ## 7. Prossimi step suggeriti
 
-Ordinati per valore/costo:
+Ordinati per valore/costo. Tutte le fasi del piano (F0-F4) sono chiuse: da qui
+in poi sono estensioni, non completamento.
 
-1. **Coverage gate rosso**: `pytest --cov` fallisce a 84.79% contro il floor 90% in `pyproject.toml`. Non è una regressione recente — è così da `af5930f`, che ha aggiunto tre metodi di `PokemonRepository` mai testati (`find_by_fuzzy_name`, `get_sprite_source_path`, filtro `sides` di `find_pokemon_by_sprite_hash`). Da chiudere insieme alla CI, altrimenti il floor non lo applica nessuno. ~1-2h per entrambi.
-2. **Sessione di cattura persistente**: ogni poll apre e chiude una sessione Windows Graphics Capture, e il bordo che il sistema disegna attorno alla finestra lampeggia a ogni giro. Una sessione long-lived con callback lo renderebbe fisso e porterebbe la cattura da ~90 ms a ~0. ~2-3h.
-3. **Abilità che modificano l'efficacia** (Levitazione, Assorbivolt, Parafulmine): oggi il calcolo guarda solo i tipi, quindi su un Gengar con Levitazione il consiglio è sbagliato. È l'unico punto in cui il tool può dare una risposta *errata* anziché incompleta. Estende `EffectivenessEngine` con un secondo layer.
-4. **Calibratore ROI visuale**: dialog con canvas su screenshot, disegni rettangoli per (nome opp, sprite opp, HUD player, ecc.). Sblocca altri giochi/scaling senza toccare codice. ~4-6h.
-5. **Altro emulatore / gioco**: aggiungere Cristallo (Gen 2 mGBA) o HeartGold (Gen 4 melonDS/DeSmuME). Serve ROI dedicate + preferred_game in `_preferred_game()`.
-6. **Test UI**: coverage componenti Qt a 0, ed è cresciuto parecchio con F4 (`_BattlePoller`, wiring del watcher, `fit_height`). `pytest-qt` per state binding di `TeamPanel` / `OpponentPanel`.
-7. **ROI `player_sprite` / `player_hp_bar`**: ancora mal centrate anche dopo la riproiezione di `1f85b1e`, perché la loro calibrazione originale era sbagliata a prescindere dal chrome. Impatto basso (il pHash in battaglia è comunque inservibile), ~1h con una cattura di riferimento.
+1. **Test UI con `pytest-qt`**: `ui/` è a coverage 0 ed è la parte cresciuta di
+   più (`_BattlePoller`, wiring del watcher, `fit_height`, selettore abilità).
+   La logica pura è coperta al 100%, il collante Qt per niente: è lì che
+   vivono ormai i bug plausibili. ~2-3h.
+2. **Calibratore ROI visuale**: dialog con canvas su screenshot, si disegnano
+   i rettangoli per (nome opp, sprite opp, HUD player, ecc.). È il
+   prerequisito pratico di qualunque nuovo gioco, e toglie di mezzo la
+   ricalibrazione a mano che in questo repo è già costata due bug. ~4-6h.
+3. **Secondo gioco**: Cristallo (Gen 2 mGBA) o HeartGold (Gen 4
+   melonDS/DeSmuME). Serve layout GB/GBC (160×144, aspect 10:9) o doppio
+   schermo DS, ROI dedicate, `preferred_game`. Nota: in Gen 1-2 non esistono
+   abilità, quindi quel layer semplicemente non si attiva.
+4. **Packaging Windows**: PyInstaller o installer, per non dipendere dal venv.
+5. **Segmentare lo sprite dallo sfondo**: il canale pHash in battaglia è
+   inservibile perché la cattura ha campo e cielo mentre le reference stanno
+   su bianco. I fondali di battaglia sono a bande piatte, quindi un flood-fill
+   dai bordi è plausibile. Recupererebbe il secondo segnale, oggi portato
+   interamente dal nome.
+6. **ROI `player_sprite` / `player_hp_bar`**: ancora mal centrate, per un
+   errore di calibrazione loro indipendente dal chrome. Impatto basso finché
+   il pHash resta inservibile (vedi sopra). ~1h con una cattura di
+   riferimento.
 
 ## 8. Convenzioni rapide
 

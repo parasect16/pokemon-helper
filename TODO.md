@@ -39,13 +39,23 @@ Convenzioni:
   Verificato sul vivo: ingresso, uscita, cambio Pokemon da entrambi i lati,
   elenco Pokemon aperto a metà lotta.
 
-- `[ ]` **Sessione di cattura persistente** (~2-3h). Ogni poll apre e chiude
-  una sessione Windows Graphics Capture e il sistema disegna un bordo attorno
-  alla finestra: il bordo lampeggia a ogni poll. Passare da 500 a 1500 ms lo
-  ha reso più discreto ma non l'ha eliminato. Fix vero: una sessione
-  long-lived con callback che tiene l'ultimo frame, come già ipotizzato nel
-  docstring di `capture.py`. Il bordo resterebbe fisso invece di lampeggiare,
-  e la cattura scenderebbe da ~90 ms a ~0.
+- `[x]` **Sessione di cattura persistente** (commit `9835e35`). Il bordo
+  disegnato da Windows è fisso invece di lampeggiare a ogni poll. Il callback
+  copia il buffer solo su richiesta: copiarli tutti sarebbe stato ~490 MB/s
+  di memcpy a 150 fps. Cattura da ~90 ms a ~9 ms, poll F4 completo ~45 ms,
+  intervallo riportato a 750 ms. La sessione si riavvia da sola quando
+  l'emulatore viene chiuso e riaperto — verificato sul vivo.
+
+- `[x]` **Abilità che modificano l'efficacia** (commit `62795e1`, `c8f7635`,
+  `dfdd893`). Tabelle `abilities` e `pokemon_abilities`, layer
+  `engine/abilities.py`, selettore e tooltip sulle card. Candidato unico
+  applicato in automatico, ambiguità segnalata solo se cambia il verdetto.
+
+- `[x]` **Coverage gate + CI** (commit `6c2357c`). `engine/` e `data/` al
+  100%, workflow GitHub Actions che applica il floor. **Da verificare**: il
+  primo run reale su GitHub, per le due variabili headless
+  (`QT_QPA_PLATFORM=offscreen`, `PYNPUT_BACKEND=dummy`) non provabili da
+  Windows.
 
 ## Da fare — polish / feature
 
@@ -77,9 +87,7 @@ Convenzioni:
 - `[ ]` **Screen mode detection formale**: euristica attuale (≥3 slot
   OCR-leggibili) può fallire. Meglio: OCR di elemento unico del menu (es.
   pulsante "ESCI" bottom-right) come sentinella.
-- `[ ]` **Ability-based type modifiers** (Levitazione = immune a Ground,
-  Assorbivolt = immune a Electric, ecc.). Estende `EffectivenessEngine` con
-  secondo layer.
+
 - `[x]` **Nickname map utente** (commit 13dd606): dialog 🏷 per associare
   nickname → species, salvato in `state.json`. Team recognize usa mappa
   prima del fuzzy match.
@@ -90,8 +98,7 @@ Convenzioni:
 
 ## Da fare — infra
 
-- `[ ]` **CI GitHub Actions**: workflow lancia `pytest --cov` + `ruff check`
-  su push. Coverage floor 90% già in `pyproject.toml`, farlo failare CI.
+
 - `[ ]` **Packaging Windows**: PyInstaller o `python -m
   build` + installer. Ora serve `pip install -e ".[dev,app,vision]"` in venv.
 
