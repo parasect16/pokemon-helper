@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pokemon_helper.ui.app import _team_snapshot_looks_like_menu
+from pokemon_helper.ui.app import _apply_team_recognition, _team_snapshot_looks_like_menu
+from pokemon_helper.ui.state import TeamSlot
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,11 +20,25 @@ class _FakeResult:
     slot_index: int
     pokemon_id: int | None
     ocr_text: str = ""
+    confidence: float = 1.0
+    level: int | None = None
 
 
-def _r(index: int, pokemon_id: int | None = None, ocr_text: str = "") -> _FakeResult:
+def _r(
+    index: int,
+    pokemon_id: int | None = None,
+    ocr_text: str = "",
+    confidence: float = 1.0,
+    level: int | None = None,
+) -> _FakeResult:
     """Shorthand per costruire un fake result."""
-    return _FakeResult(slot_index=index, pokemon_id=pokemon_id, ocr_text=ocr_text)
+    return _FakeResult(
+        slot_index=index,
+        pokemon_id=pokemon_id,
+        ocr_text=ocr_text,
+        confidence=confidence,
+        level=level,
+    )
 
 
 def test_snapshot_menu_all_slots_readable_and_distinct() -> None:
@@ -126,3 +141,85 @@ def test_snapshot_accepts_no_matches_but_enough_ocr() -> None:
     ok, reason = _team_snapshot_looks_like_menu(results)
     assert ok is True
     assert reason == ""
+
+
+# --------------------------------------------------------------- apply team
+
+
+def _team(*pairs):
+    """Squadra corrente da coppie `(pokemon_id, level)`, `None` per slot vuoto."""
+    return [None if p is None else TeamSlot(pokemon_id=p[0], level=p[1]) for p in pairs]
+
+
+def _six(result):
+    """Snapshot di sei slot con `result` in posizione 0 e il resto vuoto."""
+    return [result] + [_r(i) for i in range(1, 6)]
+
+
+def test_confident_match_overwrites_the_slot() -> None:
+    new = _apply_team_recognition(
+        _six(_r(0, pokemon_id=6, ocr_text="CHARIZARD", confidence=0.9, level=38)),
+        _team((25, 10), None, None, None, None, None),
+    )
+    assert new[0] == TeamSlot(pokemon_id=6, level=38)
+
+
+def test_weak_match_preserves_the_previous_slot() -> None:
+    """Sotto soglia non si scrive: meglio il valore vecchio di una specie sbagliata.
+
+    È il caso del fallback icona che aveva piazzato Banette al posto di
+    Charizard.
+    """
+    new = _apply_team_recognition(
+        _six(_r(0, pokemon_id=354, ocr_text="FIAHHETTA", confidence=0.5)),
+        _team((6, 38), None, None, None, None, None),
+    )
+    assert new[0] == TeamSlot(pokemon_id=6, level=38)
+
+
+def test_match_exactly_at_the_threshold_is_applied() -> None:
+    new = _apply_team_recognition(
+        _six(_r(0, pokemon_id=6, ocr_text="CHARIZARD", confidence=0.6, level=38)),
+        _team(None, None, None, None, None, None),
+    )
+    assert new[0] == TeamSlot(pokemon_id=6, level=38)
+
+
+def test_weak_match_without_previous_slot_leaves_it_empty() -> None:
+    new = _apply_team_recognition(
+        _six(_r(0, pokemon_id=354, ocr_text="FIAHHETTA", confidence=0.2)),
+        _team(None, None, None, None, None, None),
+    )
+    assert new[0] is None
+
+
+def test_missing_level_falls_back_to_the_level_of_the_same_pokemon() -> None:
+    """Con alterazione di stato il livello non è leggibile: si tiene il vecchio."""
+    new = _apply_team_recognition(
+        _six(_r(0, pokemon_id=6, ocr_text="CHARIZARD", confidence=0.9, level=None)),
+        _team((6, 38), None, None, None, None, None),
+    )
+    assert new[0] == TeamSlot(pokemon_id=6, level=38)
+
+
+def test_missing_level_for_an_unknown_pokemon_defaults_to_fifty() -> None:
+    new = _apply_team_recognition(
+        _six(_r(0, pokemon_id=6, ocr_text="CHARIZARD", confidence=0.9, level=None)),
+        _team(None, None, None, None, None, None),
+    )
+    assert new[0] == TeamSlot(pokemon_id=6, level=50)
+
+
+def test_empty_ocr_clears_the_slot() -> None:
+    new = _apply_team_recognition(
+        _six(_r(0, ocr_text="")),
+        _team((6, 38), None, None, None, None, None),
+    )
+    assert new[0] is None
+
+
+def test_custom_threshold_is_honoured() -> None:
+    results = _six(_r(0, pokemon_id=6, ocr_text="CHARIZARD", confidence=0.5, level=38))
+    current = _team(None, None, None, None, None, None)
+    assert _apply_team_recognition(results, current, min_confidence=0.4)[0] is not None
+    assert _apply_team_recognition(results, current, min_confidence=0.9)[0] is None

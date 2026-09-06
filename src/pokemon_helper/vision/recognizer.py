@@ -229,10 +229,15 @@ class Recognizer:
                 if icon_matches:
                     best = icon_matches[0]
                     pokemon_id = best.pokemon_id
-                    # Confidenza inversamente proporzionale alla distanza:
-                    # 0 → 1.0, `icon_max_distance` → 0.5. Sopra soglia il match
-                    # è già stato scartato da `find_pokemon_by_sprite_hash`.
-                    confidence = max(0.5, 1.0 - best.distance / (icon_max_distance * 2))
+                    # Confidenza lineare nella distanza: 0 → 1.0,
+                    # `icon_max_distance` → 0.0. Prima c'era un pavimento a
+                    # 0.5 che faceva sembrare accettabile anche il match
+                    # peggiore ammesso, ed è così che Banette è finito nello
+                    # slot di Charizard. Le distanze osservate sulle icone
+                    # reali stanno fra 16 e 24 anche quando il match è quello
+                    # giusto, quindi con questa scala il canale supera la
+                    # soglia di applicazione solo quando è davvero vicino.
+                    confidence = max(0.0, 1.0 - best.distance / icon_max_distance)
                     source = "icon"
 
             results.append(

@@ -106,6 +106,12 @@ _GAME_BY_GENERATION: dict[int, str] = {
     3: "firered",
 }
 
+# Confidenza minima perché un riconoscimento venga applicato allo stato.
+# Vale sia per l'avversario sia per i sei slot della squadra: sotto questa
+# soglia si preferisce non toccare nulla piuttosto che scrivere una specie
+# sbagliata.
+MIN_RECOGNITION_CONFIDENCE = 0.6
+
 
 def default_db_path() -> Path:
     """Path atteso del database SQLite: `<cwd>/data/pokemon.sqlite`."""
@@ -240,7 +246,7 @@ def _init_recognize_hotkey(
     bridge.opponent_failed.connect(_on_opp_fail)
     bridge.team_failed.connect(_on_team_fail)
 
-    min_confidence = 0.6
+    min_confidence = MIN_RECOGNITION_CONFIDENCE
 
     def on_recognize() -> None:
         try:
@@ -392,22 +398,33 @@ def _team_snapshot_looks_like_menu(results) -> tuple[bool, str]:
     return True, ""
 
 
-def _apply_team_recognition(results, current_team) -> list:
+def _apply_team_recognition(
+    results, current_team, min_confidence: float = MIN_RECOGNITION_CONFIDENCE
+) -> list:
     """Combina i risultati del recognize_team con il team corrente.
 
     Regole:
-    - Slot con `pokemon_id` valido → nuovo `TeamSlot` (livello letto, fallback
-      al livello esistente per lo stesso Pokemon, altrimenti 50).
-    - Slot senza match ma con testo OCR non vuoto (tipicamente un nickname
-      sconosciuto): preserva lo slot corrispondente del team corrente.
+    - Slot con `pokemon_id` valido e confidenza sufficiente → nuovo `TeamSlot`
+      (livello letto, fallback al livello esistente per lo stesso Pokemon,
+      altrimenti 50).
+    - Slot senza match, o con match sotto soglia, ma con testo OCR non vuoto
+      (tipicamente un nickname sconosciuto): preserva lo slot corrispondente
+      del team corrente.
     - Slot con OCR vuoto → slot vuoto (`None`).
+
+    La soglia esiste perché finora un match debole veniva scritto come uno
+    certo: il fallback pHash sull'icona accettava qualunque candidato entro
+    `icon_max_distance` e una volta ha piazzato Banette nello slot di
+    Charizard. Preservare il valore precedente è sempre preferibile a
+    sovrascriverlo con una specie sbagliata, tanto più quando l'aggiornamento
+    parte da solo (F4) e nessuno lo sta guardando.
     """
     current_levels: dict[int, int] = {
         slot.pokemon_id: slot.level for slot in current_team if slot is not None
     }
     new_team: list = []
     for result in results:
-        if result.pokemon_id is not None:
+        if result.pokemon_id is not None and result.confidence >= min_confidence:
             level = result.level or current_levels.get(result.pokemon_id, 50)
             new_team.append(TeamSlot(pokemon_id=result.pokemon_id, level=level))
         elif result.ocr_text.strip():
