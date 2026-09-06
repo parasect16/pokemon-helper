@@ -74,6 +74,28 @@ _TYPES_ROWS: tuple[tuple[int, int, int, str], ...] = (
 )
 
 
+# (id, identifier, name_en, name_it, generation_introduced). Scelte per
+# coprire i tre assi del filtro di `get_abilities`: introduzione tardiva,
+# abilità nascosta, effetto che dipende dalla generazione.
+_ABILITY_ROWS: tuple[tuple[int, str, str, str | None, int], ...] = (
+    (26, "levitate", "Levitate", "Levitazione", 3),
+    (78, "motor-drive", "Motor Drive", "Elettrorapid", 4),
+    (10, "volt-absorb", "Volt Absorb", None, 3),
+    (157, "sap-sipper", "Sap Sipper", "Mangiaerba", 5),
+)
+
+# (pokemon_id, ability_id, slot, is_hidden).
+_POKEMON_ABILITY_ROWS: tuple[tuple[int, int, int, int], ...] = (
+    # Gastly: una sola abilità, disponibile da Gen 3 → mai ambigua.
+    (92, 26, 1, 0),
+    # Magnemite: due abilità ordinarie, la seconda introdotta solo in Gen 4.
+    (81, 10, 1, 0),
+    (81, 78, 2, 0),
+    # Bulbasaur: solo un'abilità nascosta, quindi invisibile prima della Gen 5.
+    (1, 157, 3, 1),
+)
+
+
 @pytest.fixture
 def repository() -> Iterator[PokemonRepository]:
     """Repository su un DB SQLite in-memory precaricato coi dati di test."""
@@ -87,6 +109,16 @@ def repository() -> Iterator[PokemonRepository]:
     connection.executemany(
         "INSERT INTO pokemon_types_by_gen (pokemon_id, generation, slot, type) VALUES (?, ?, ?, ?)",
         _TYPES_ROWS,
+    )
+    connection.executemany(
+        "INSERT INTO abilities (id, identifier, name_en, name_it, generation_introduced) "
+        "VALUES (?, ?, ?, ?, ?)",
+        _ABILITY_ROWS,
+    )
+    connection.executemany(
+        "INSERT INTO pokemon_abilities (pokemon_id, ability_id, slot, is_hidden) "
+        "VALUES (?, ?, ?, ?)",
+        _POKEMON_ABILITY_ROWS,
     )
     connection.executemany(
         "INSERT INTO sprite_hashes "

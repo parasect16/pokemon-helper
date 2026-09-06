@@ -289,3 +289,61 @@ def test_find_by_sprite_hash_limit_caps_results(repository: PokemonRepository) -
         "0000000000000000", generation=1, max_distance=64, limit=1
     )
     assert len(matches) == 1
+
+
+# --------------------------------------------------------------- abilità
+
+
+def test_get_abilities_returns_nothing_before_generation_three(
+    repository: PokemonRepository,
+) -> None:
+    """Le abilità sono state introdotte in Gen 3: prima non esistono."""
+    assert repository.get_abilities(92, 1) == []
+    assert repository.get_abilities(92, 2) == []
+
+
+def test_get_abilities_returns_the_single_candidate(repository: PokemonRepository) -> None:
+    abilities = repository.get_abilities(92, 3)
+    assert [a.identifier for a in abilities] == ["levitate"]
+    assert abilities[0].name_it == "Levitazione"
+    assert abilities[0].is_hidden is False
+
+
+def test_an_ability_introduced_later_is_filtered_out(repository: PokemonRepository) -> None:
+    """Elettrorapid è di Gen 4: in Gen 3 Magnemite ha una sola abilità."""
+    assert [a.identifier for a in repository.get_abilities(81, 3)] == ["volt-absorb"]
+    assert [a.identifier for a in repository.get_abilities(81, 4)] == [
+        "volt-absorb",
+        "motor-drive",
+    ]
+
+
+def test_hidden_abilities_appear_only_from_generation_five(
+    repository: PokemonRepository,
+) -> None:
+    assert repository.get_abilities(1, 4) == []
+    assert [a.identifier for a in repository.get_abilities(1, 5)] == ["sap-sipper"]
+
+
+def test_abilities_are_ordered_by_slot(repository: PokemonRepository) -> None:
+    assert [a.slot for a in repository.get_abilities(81, 5)] == [1, 2]
+
+
+def test_get_abilities_for_a_pokemon_without_any(repository: PokemonRepository) -> None:
+    assert repository.get_abilities(4, 5) == []
+
+
+def test_get_abilities_for_an_unknown_pokemon(repository: PokemonRepository) -> None:
+    assert repository.get_abilities(9999, 5) == []
+
+
+def test_get_abilities_rejects_unsupported_generation(repository: PokemonRepository) -> None:
+    with pytest.raises(ValueError, match="unsupported generation"):
+        repository.get_abilities(92, 6)
+
+
+def test_display_name_falls_back_to_english(repository: PokemonRepository) -> None:
+    """`volt-absorb` non ha nome italiano nel fixture."""
+    ability = repository.get_abilities(81, 3)[0]
+    assert ability.name_it is None
+    assert ability.display_name == "Volt Absorb"

@@ -12,11 +12,19 @@ Uso:
 
 Requisiti: `git` disponibile nel PATH, ~30 MB liberi.
 
-Cambi di tipo storici (PLAN §5). veekun/pokedex non pubblica in CSV una
-tabella `pokemon_types_past`: la storia dei cambi di tipo va codificata a
-mano. Nel range Gen 1-5 l'unico cambio noto è la linea Magnemite, che
-passa da Electric puro (Gen 1) a Electric/Steel (Gen 2+). Le eccezioni
-vivono in `TYPE_HISTORY_OVERRIDES`; se ne emergono altre vanno aggiunte lì.
+Cambi storici non desumibili dai CSV (PLAN §5). veekun/pokedex non pubblica
+né `pokemon_types_past` né l'equivalente per le abilità: entrambi i CSV
+descrivono l'assegnazione **corrente**, e la storia va codificata a mano.
+
+- Tipi: nel range Gen 1-5 l'unico cambio noto è la linea Magnemite, da
+  Electric puro (Gen 1) a Electric/Steel (Gen 2+). Vive in
+  `TYPE_HISTORY_OVERRIDES`.
+- Abilità: Gengar aveva Levitazione fino alla Gen 6 e l'ha persa in Gen 7,
+  quindi il CSV corrente la ometterebbe proprio dove serve. Vive in
+  `ABILITY_HISTORY_OVERRIDES`.
+
+Attenzione: questo script **ricrea il file da zero**, quindi cancella anche
+`sprite_hashes`. Dopo averlo eseguito va rilanciato `build_sprite_index.py`.
 """
 
 from __future__ import annotations
@@ -55,6 +63,24 @@ TYPE_HISTORY_OVERRIDES: dict[int, dict[int, tuple[tuple[int, str], ...]]] = {
     81: {1: ((1, "electric"),)},
     # Magneton: stessa storia della sua pre-evoluzione.
     82: {1: ((1, "electric"),)},
+}
+
+# Cambi di abilità storici, stesso problema dei tipi: `pokemon_abilities.csv`
+# descrive l'assegnazione corrente e veekun non ship quella storica.
+# Struttura: species_id -> (identifier abilità in ordine di slot, ...). Qui non
+# serve distinguere per generazione: gli override elencati valgono per tutte le
+# generazioni in scope (1-5), dato che i cambi sono avvenuti dopo.
+#
+# Il caso che conta è Gengar, ed è anche il motivo per cui questa tabella
+# esiste: aveva Levitazione dalla Gen 3 alla Gen 6 e l'ha persa in Gen 7. Senza
+# override, in Rosso Fuoco risulterebbe senza abilità e il pannello
+# continuerebbe a consigliare mosse di Terra contro un Pokemon che ne è immune
+# — esattamente l'errore che questa funzionalità deve eliminare.
+#
+# Le altre 30 specie con Levitazione nel dataset l'hanno mantenuta, Gastly e
+# Haunter compresi: è solo Gengar ad essere cambiato.
+ABILITY_HISTORY_OVERRIDES: dict[int, tuple[str, ...]] = {
+    94: ("levitate",),
 }
 
 
@@ -114,6 +140,7 @@ def build_database() -> None:
         init_schema(conn)
         ingest_pokemon(conn)
         ingest_types_by_gen(conn)
+        ingest_abilities(conn)
         conn.commit()
     finally:
         conn.close()
@@ -184,6 +211,83 @@ def ingest_types_by_gen(conn: sqlite3.Connection) -> None:
     print(f"[ingest] pokemon_types_by_gen: {len(inserts)} rows")
 
 
+def ingest_abilities(conn: sqlite3.Connection) -> None:
+    """Popola `abilities` e `pokemon_abilities`.
+
+    Vengono importate solo le abilità introdotte entro `MAX_GEN`: quelle più
+    recenti non possono comparire in nessun gioco in scope. Le abilità non
+    esistono affatto prima della Gen 3, quindi `abilities` non contiene nulla
+    di anteriore.
+
+    `pokemon_abilities.csv` di veekun descrive l'assegnazione **corrente**,
+    non quella storica — stesso limite già noto per `pokemon_types.csv`. Il
+    filtro per generazione di introduzione dell'abilità copre il caso
+    frequente (un'abilità di Gen 4 non è disponibile in Gen 3); i rari casi in
+    cui una specie ha cambiato abilità restando la stessa abilità disponibile
+    non sono ricostruibili da questi CSV.
+    """
+    lang_ids = _language_ids()
+    names_by_lang = _ability_names_by_lang()
+
+    ability_rows = [
+        row for row in _read_csv("abilities.csv") if int(row["generation_id"]) <= MAX_GEN
+    ]
+    ability_inserts: list[tuple[int, str, str, str | None, int]] = []
+    for row in ability_rows:
+        ability_id = int(row["id"])
+        identifier = row["identifier"]
+        name_en = names_by_lang.get(lang_ids[ENGLISH_ISO], {}).get(ability_id, identifier.title())
+        name_it = names_by_lang.get(lang_ids[ITALIAN_ISO], {}).get(ability_id)
+        ability_inserts.append(
+            (ability_id, identifier, name_en, name_it, int(row["generation_id"]))
+        )
+
+    conn.executemany(
+        "INSERT INTO abilities (id, identifier, name_en, name_it, generation_introduced) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ability_inserts,
+    )
+
+    # Solo le specie già presenti in `pokemon`, e solo le abilità importate.
+    known_species = {row[0] for row in conn.execute("SELECT id FROM pokemon")}
+    known_abilities = {row[0] for row in ability_inserts}
+    species_by_pokemon = {
+        pokemon_id: species_id
+        for species_id, pokemon_id in _default_pokemon_ids_for_species(conn).items()
+    }
+
+    ability_ids_by_identifier = {row[1]: row[0] for row in ability_inserts}
+
+    link_inserts: list[tuple[int, int, int, int]] = []
+    for row in _read_csv("pokemon_abilities.csv"):
+        species_id = species_by_pokemon.get(int(row["pokemon_id"]))
+        ability_id = int(row["ability_id"])
+        if species_id is None or species_id not in known_species:
+            continue
+        if ability_id not in known_abilities:
+            continue
+        if species_id in ABILITY_HISTORY_OVERRIDES:
+            continue
+        link_inserts.append((species_id, ability_id, int(row["slot"]), int(row["is_hidden"])))
+
+    for species_id, identifiers in ABILITY_HISTORY_OVERRIDES.items():
+        if species_id not in known_species:
+            continue
+        for slot, identifier in enumerate(identifiers, start=1):
+            ability_id = ability_ids_by_identifier.get(identifier)
+            if ability_id is None:
+                raise KeyError(f"override references unknown ability {identifier!r}")
+            link_inserts.append((species_id, ability_id, slot, 0))
+
+    conn.executemany(
+        "INSERT OR IGNORE INTO pokemon_abilities (pokemon_id, ability_id, slot, is_hidden) "
+        "VALUES (?, ?, ?, ?)",
+        link_inserts,
+    )
+    print(f"[ingest] abilities: {len(ability_inserts)} rows")
+    print(f"[ingest] pokemon_abilities: {len(link_inserts)} rows")
+
+
 # ---------------------------------------------------------------------------
 # Helper di lettura CSV
 # ---------------------------------------------------------------------------
@@ -193,6 +297,15 @@ def _read_csv(name: str) -> list[dict[str, str]]:
     """Legge un CSV di veekun come lista di dict (colonna -> valore stringa)."""
     with (CSV_DIR / name).open(encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _ability_names_by_lang() -> dict[int, dict[int, str]]:
+    """Mappa lingua -> {ability_id -> nome localizzato}."""
+    by_lang: dict[int, dict[int, str]] = {}
+    for row in _read_csv("ability_names.csv"):
+        lang = int(row["local_language_id"])
+        by_lang.setdefault(lang, {})[int(row["ability_id"])] = row["name"]
+    return by_lang
 
 
 def _language_ids() -> dict[str, int]:

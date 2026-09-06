@@ -28,6 +28,33 @@ class Pokemon:
 
 
 @dataclass(frozen=True, slots=True)
+class Ability:
+    """Abilità di un Pokemon, disponibile in una data generazione.
+
+    Attributi:
+        id: identificatore numerico allineato al Pokedex.
+        identifier: slug in inglese, es. "levitate". È la chiave con cui
+            `engine.abilities` decide se e come modificare l'efficacia.
+        name_en: nome in inglese formattato per display.
+        name_it: nome in italiano, se disponibile nel dataset upstream.
+        slot: 1 o 2 per le abilità ordinarie, 3 per la nascosta.
+        is_hidden: abilità nascosta, esistente solo dalla Gen 5.
+    """
+
+    id: int
+    identifier: str
+    name_en: str
+    name_it: str | None
+    slot: int
+    is_hidden: bool
+
+    @property
+    def display_name(self) -> str:
+        """Nome da mostrare: italiano se c'è, altrimenti inglese."""
+        return self.name_it or self.name_en
+
+
+@dataclass(frozen=True, slots=True)
 class SpriteMatch:
     """Corrispondenza fra uno sprite catturato e un Pokemon indicizzato.
 

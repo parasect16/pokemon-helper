@@ -58,6 +58,35 @@ CREATE TABLE IF NOT EXISTS sprite_hashes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sprite_hashes_gen ON sprite_hashes(generation);
+
+-- Abilità note al dataset. `generation_introduced` serve a filtrarle per
+-- generazione di gioco: un'abilità di Gen 4 non può comparire in Rosso Fuoco.
+-- Le abilità non esistono affatto prima della Gen 3.
+CREATE TABLE IF NOT EXISTS abilities (
+    id INTEGER PRIMARY KEY,
+    identifier TEXT NOT NULL UNIQUE,
+    name_en TEXT NOT NULL,
+    name_it TEXT,
+    generation_introduced INTEGER NOT NULL
+        CHECK (generation_introduced BETWEEN 3 AND 5)
+);
+
+-- Assegnazione abilità → specie. `slot` distingue prima e seconda abilità
+-- ordinaria; `is_hidden` marca le abilità nascoste, che esistono solo dalla
+-- Gen 5. Il filtro per generazione vive nel repository, non qui: la stessa
+-- riga vale per tutte le generazioni in cui l'abilità è disponibile.
+CREATE TABLE IF NOT EXISTS pokemon_abilities (
+    pokemon_id INTEGER NOT NULL,
+    ability_id INTEGER NOT NULL,
+    slot INTEGER NOT NULL,
+    is_hidden INTEGER NOT NULL CHECK (is_hidden IN (0, 1)),
+    PRIMARY KEY (pokemon_id, ability_id),
+    FOREIGN KEY (pokemon_id) REFERENCES pokemon(id),
+    FOREIGN KEY (ability_id) REFERENCES abilities(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pokemon_abilities_pokemon
+    ON pokemon_abilities(pokemon_id);
 """
 
 

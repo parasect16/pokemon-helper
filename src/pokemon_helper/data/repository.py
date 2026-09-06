@@ -14,7 +14,7 @@ import sqlite3
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from pokemon_helper.data.models import Pokemon, SpriteMatch
+from pokemon_helper.data.models import Ability, Pokemon, SpriteMatch
 
 # Lingue accettate da `find_by_name`. Estendibile in futuro (es. "de", "fr").
 _SUPPORTED_LANGUAGES: frozenset[str] = frozenset({"it", "en"})
@@ -115,6 +115,45 @@ class PokemonRepository:
             (generation,),
         ).fetchall()
         return [_row_to_pokemon(row) for row in rows]
+
+    def get_abilities(self, pokemon_id: int, generation: int) -> list[Ability]:
+        """Abilità che il Pokemon può avere in quella generazione.
+
+        Il filtro per generazione è ciò che rende utilizzabile un dataset che
+        descrive l'assegnazione corrente:
+
+        - le abilità non esistono prima della Gen 3, quindi per Gen 1 e 2 la
+          lista è sempre vuota;
+        - un'abilità introdotta dopo la generazione richiesta non può
+          comparirvi (Elettrorapid è di Gen 4: in Rosso Fuoco non esiste);
+        - le abilità nascoste arrivano in Gen 5 e prima vanno escluse.
+
+        Quando resta un solo candidato l'abilità è certa e il chiamante può
+        applicarla senza chiedere nulla; con più candidati resta ambigua.
+        Ordinate per slot, così il primo elemento è l'abilità primaria.
+        """
+        if not 1 <= generation <= 5:
+            raise ValueError(f"unsupported generation: {generation}")
+        rows = self._conn.execute(
+            "SELECT a.id, a.identifier, a.name_en, a.name_it, pa.slot, pa.is_hidden "
+            "FROM pokemon_abilities pa JOIN abilities a ON a.id = pa.ability_id "
+            "WHERE pa.pokemon_id = ? "
+            "  AND a.generation_introduced <= ? "
+            "  AND (pa.is_hidden = 0 OR ? >= 5) "
+            "ORDER BY pa.slot",
+            (pokemon_id, generation, generation),
+        ).fetchall()
+        return [
+            Ability(
+                id=int(row["id"]),
+                identifier=row["identifier"],
+                name_en=row["name_en"],
+                name_it=row["name_it"],
+                slot=int(row["slot"]),
+                is_hidden=bool(row["is_hidden"]),
+            )
+            for row in rows
+        ]
 
     def find_by_fuzzy_name(
         self,
