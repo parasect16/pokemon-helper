@@ -17,3 +17,17 @@ repos:
         args: [--maxkb=1024]
       - id: mixed-line-ending
         args: [--fix=lf]
+
+  # Il floor di coverage vive in pyproject.toml ma un file di config non
+  # applica nulla da solo: era già sceso al 84.79% senza che se ne accorgesse
+  # nessuno. Questo progetto non ha CI, quindi il controllo va qui. La suite
+  # gira in meno di un secondo, quindi il costo per commit è trascurabile.
+  - repo: local
+    hooks:
+      - id: pytest-cov
+        name: pytest --cov
+        entry: pytest --cov
+        language: system
+        pass_filenames: false
+        # Anche cambiando solo i test o pyproject il floor va rivalutato.
+        always_run: true

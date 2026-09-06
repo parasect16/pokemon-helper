@@ -63,8 +63,6 @@ scripts/
   recognize_test.py          # end-to-end recognize opponent
   recognize_team_test.py     # end-to-end recognize squadra
   battle_watch_debug.py      # eventi F4 (ENTERED/LEFT/CHANGED) senza GUI
-
-.github/workflows/ci.yml     # ruff + pytest --cov su push e PR
   player_debug.py            # end-to-end recognize player (con crop + overlay)
   extract_roi_from_annotated.py  # bbox per colore da PNG annotato → coord Roi
 
@@ -84,7 +82,7 @@ pytest -q                            # 280 test, tutti verdi
 pytest --cov                         # coverage con floor 90% su engine+data (oggi 100%)
 ruff check .                         # lint
 ruff format .                        # format
-pre-commit run --all-files           # tutti gli hook (ruff + eol + ecc.)
+pre-commit run --all-files           # tutti gli hook (ruff + eol + pytest --cov)
 POKEMON_HELPER_SMOKE=1 python -m pokemon_helper   # avvia + auto-quit dopo 2 s
 ```
 
@@ -112,7 +110,6 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 - **Abilità ambigue**: molte specie ne ammettono più d'una e dallo sprite non si distinguono. Il filtro per generazione ne risolve circa metà in Gen 3, meno in Gen 5. Per il resto il pannello non applica nulla e segnala il dubbio, e l'abilità si fissa a mano dal menu sulla card.
 - **Abilità storiche**: veekun pubblica solo l'assegnazione corrente. `ABILITY_HISTORY_OVERRIDES` copre Gengar (che ha perso Levitazione in Gen 7); altri casi eventuali vanno aggiunti lì a mano.
 - **Ambiente**: F2/F3/F4 richiedono Windows nativo (COM + Windows Graphics Capture + hotkey Win32). Logica pura (`engine/`, `data/`) ovunque, anche WSL/Linux.
-- **CI mai eseguita**: il workflow c'è ma non è ancora girato su GitHub. Le due variabili headless (`QT_QPA_PLATFORM=offscreen`, `PYNPUT_BACKEND=dummy`) non erano verificabili da Windows; se il primo run fallisce, è lì che guardare.
 - **Nickname Pokemon**: il fuzzy sui nomi di specie non li riconosce. Fix via mappa utente `state.nicknames` (dialog 🏷), consultata sia da `recognize_team` sia da `recognize_player` (l'HUD di combattimento mostra il nickname, non la specie). Il confronto è fuzzy, quindi assorbe i tipici errori OCR: il nickname va scritto **come appare nel gioco**.
 
 ## 7. Prossimi step suggeriti
@@ -147,7 +144,7 @@ in poi sono estensioni, non completamento.
 
 - Commit: Conventional Commits, scope in parentesi (es. `feat(f3):`). Body opzionale ma preferito per "il perché".
 - Codice/log/identificatori in inglese; docstring e commenti in italiano.
-- Coverage minima 90% su `engine/` e `data/` (fail CI sotto soglia).
+- Coverage minima 90% su `engine/` e `data/`. Non c'è CI: il floor è applicato dall'hook pre-commit `pytest --cov`, che blocca il commit se scende.
 - `.gitattributes` forza LF ovunque; non toccare `core.autocrlf`.
 
 ## 9. File di stato utente

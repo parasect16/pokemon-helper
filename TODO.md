@@ -51,11 +51,12 @@ Convenzioni:
   `engine/abilities.py`, selettore e tooltip sulle card. Candidato unico
   applicato in automatico, ambiguità segnalata solo se cambia il verdetto.
 
-- `[x]` **Coverage gate + CI** (commit `6c2357c`). `engine/` e `data/` al
-  100%, workflow GitHub Actions che applica il floor. **Da verificare**: il
-  primo run reale su GitHub, per le due variabili headless
-  (`QT_QPA_PLATFORM=offscreen`, `PYNPUT_BACKEND=dummy`) non provabili da
-  Windows.
+- `[x]` **Coverage gate** (commit `6c2357c`). `engine/` e `data/` al 100%.
+  Il progetto non ha CI e non ne avrà, quindi il floor è applicato dall'hook
+  pre-commit `pytest --cov`: la suite gira in meno di un secondo, quindi il
+  costo per commit è trascurabile. Un floor in un file di config non applica
+  nulla da solo — è già sceso a 84.79% una volta senza che nessuno se ne
+  accorgesse.
 
 ## Da fare — polish / feature
 

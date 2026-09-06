@@ -60,7 +60,8 @@ Soglia minima **90%** su pacchetti logica pura:
 - `src/pokemon_helper/engine/`
 - `src/pokemon_helper/data/`
 
-Config in `pyproject.toml` sotto `[tool.coverage.*]`. Sotto soglia CI fallisce.
+Config in `pyproject.toml` sotto `[tool.coverage.*]`. Non c'è CI: sotto soglia
+fallisce l'hook pre-commit `pytest --cov`, che blocca il commit.
 
 ## Lint e formattazione
 
@@ -118,7 +119,7 @@ python -m pokemon_helper            # smoke test entry-point
 
 Extras opzionali:
 
-- `[dev]` (dev+CI): `pytest`, `pytest-cov`, `ruff`, `pre-commit`.
+- `[dev]`: `pytest`, `pytest-cov`, `ruff`, `pre-commit`.
 - `[app]` (overlay Windows F2): `PySide6>=6.7`, `pynput>=1.7`.
 - `[vision]` (F0.2 sprite indexing + F3 runtime): `Pillow>=10`, `imagehash>=4.3`, `windows-capture>=1.4` (Windows-only), `rapidocr>=3.9`, `onnxruntime>=1.19`. Pacchetto legacy `rapidocr-onnxruntime` non ha wheel per Python 3.14.
 
