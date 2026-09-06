@@ -51,6 +51,11 @@ class AppState:
     `auto_detect` abilita il polling periodico della finestra dell'emulatore
     (F4). È spento di default: mentre è attivo l'app cattura lo schermo di
     continuo, e quella è una scelta che deve restare dell'utente.
+
+    `abilities` fissa l'abilità di una specie (`pokemon_id` -> identifier)
+    quando il dataset ne ammette più d'una e il gioco non lascia capire quale
+    sia. Vale sia per l'avversario sia per la squadra: una volta scoperta in
+    battaglia, la scelta resta.
     """
 
     generation: int = DEFAULT_GENERATION
@@ -59,6 +64,7 @@ class AppState:
     overlay_y: int | None = None
     nicknames: dict[str, int] = field(default_factory=dict)
     auto_detect: bool = False
+    abilities: dict[int, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not MIN_GENERATION <= self.generation <= MAX_GENERATION:
@@ -135,6 +141,7 @@ def _serialize(state: AppState) -> dict:
         "overlay_y": state.overlay_y,
         "nicknames": dict(state.nicknames),
         "auto_detect": state.auto_detect,
+        "abilities": {str(k): v for k, v in state.abilities.items()},
     }
 
 
@@ -164,7 +171,19 @@ def _deserialize(payload: dict) -> AppState:
         overlay_y=_optional_int(payload.get("overlay_y")),
         nicknames=nicknames,
         auto_detect=bool(payload.get("auto_detect", False)),
+        abilities=_deserialize_abilities(payload.get("abilities")),
     )
+
+
+def _deserialize_abilities(raw: object) -> dict[int, str]:
+    """Mappa `pokemon_id -> identifier abilità`, con chiavi riportate a int.
+
+    Il JSON ammette solo chiavi stringa, quindi la conversione va rifatta in
+    lettura. Assente o non-dict = nessuna abilità fissata.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    return {int(key): str(value) for key, value in raw.items()}
 
 
 def _optional_int(value: object) -> int | None:

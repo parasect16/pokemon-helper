@@ -54,6 +54,7 @@ class TeamPanel(QWidget):
     nicknamesRequested = Signal()  # utente ha cliccato "Nickname"
     autoDetectToggled = Signal(bool)  # utente ha cambiato l'interruttore auto-detect
     contentResized = Signal()  # il contenuto ha cambiato ingombro verticale
+    abilityPinned = Signal(int, object)  # (pokemon_id, identifier | None)
 
     def __init__(
         self,
@@ -128,6 +129,7 @@ class TeamPanel(QWidget):
 
         # Sezione avversario: placeholder finché non c'è un combattimento.
         self._opponent_panel = OpponentPanel(self._repository, self._state)
+        self._opponent_panel.abilityPinned.connect(self.abilityPinned)
         outer.addWidget(self._opponent_panel)
 
         # Senza questo, lo spazio verticale in eccesso viene spartito fra i sei

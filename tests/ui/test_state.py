@@ -264,3 +264,16 @@ def test_state_store_deserializes_team_slots(tmp_path: Path) -> None:
     state = store.load()
     assert state.team[0] == TeamSlot(pokemon_id=1, level=10)
     assert state.team[1] is None
+
+
+def test_pinned_abilities_survive_a_roundtrip(tmp_path: Path) -> None:
+    """Le chiavi tornano int: il JSON le ammette solo come stringa."""
+    store = StateStore(tmp_path / "state.json")
+    store.save(AppState(generation=3, abilities={94: "levitate", 171: "volt-absorb"}))
+    assert store.load().abilities == {94: "levitate", 171: "volt-absorb"}
+
+
+def test_abilities_default_to_empty_for_older_state_files(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({"generation": 3, "team": [None] * 6}), encoding="utf-8")
+    assert StateStore(path).load().abilities == {}

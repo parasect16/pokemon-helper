@@ -228,6 +228,17 @@ def run() -> int:
     # Le card avversario compaiono e spariscono: senza questo la finestra
     # cresce a inizio combattimento e resta alta e mezza vuota alla fine.
     team_panel.contentResized.connect(window.fit_height)
+
+    def on_ability_pinned(pokemon_id: int, identifier: object) -> None:
+        """Fissa o sblocca l'abilità di una specie e ridisegna il pannello."""
+        if identifier is None:
+            state.abilities.pop(pokemon_id, None)
+        else:
+            state.abilities[pokemon_id] = str(identifier)
+        store.save(state)
+        team_panel.apply_state(state)
+
+    team_panel.abilityPinned.connect(on_ability_pinned)
     _wire_nickname_dialog(window, team_panel, repository, state, store)
 
     bridge = _HotkeyBridge()

@@ -29,9 +29,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -42,6 +43,7 @@ from PySide6.QtWidgets import (
 
 from pokemon_helper.data import PokemonRepository
 from pokemon_helper.engine import EffectivenessEngine
+from pokemon_helper.engine.abilities import apply_ability, modifies_effectiveness
 from pokemon_helper.ui.state import AppState
 from pokemon_helper.ui.types_meta import render_type_badge, render_type_badges
 
@@ -67,6 +69,9 @@ def format_multiplier(value: float) -> str:
 
 class OpponentPanel(QWidget):
     """Sezione con placeholder + eventualmente due card (player + avversario)."""
+
+    # (pokemon_id, identifier | None): l'utente ha fissato o sbloccato l'abilità.
+    abilityPinned = Signal(int, object)
 
     def __init__(self, repository: PokemonRepository, state: AppState) -> None:
         super().__init__()
@@ -198,7 +203,14 @@ class OpponentPanel(QWidget):
         types_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(types_label)
 
-        eff_label = QLabel(_render_effectiveness_html(types, generation), card)
+        applied, candidates = resolve_ability(
+            self._repo.get_abilities(pokemon.id, generation),
+            self._state.abilities.get(pokemon.id),
+        )
+        if candidates:
+            layout.addWidget(self._build_ability_row(card, pokemon.id, applied, candidates))
+
+        eff_label = QLabel(_render_effectiveness_html(types, generation, applied), card)
         eff_label.setTextFormat(Qt.TextFormat.RichText)
         eff_label.setWordWrap(True)
         # Font size intrinseco al widget: l'HTML può alzarlo ulteriormente
@@ -207,6 +219,43 @@ class OpponentPanel(QWidget):
         layout.addWidget(eff_label)
         layout.addStretch(1)
         return card
+
+    def _build_ability_row(
+        self, parent: QWidget, pokemon_id: int, applied: str | None, candidates: list
+    ) -> QWidget:
+        """Riga abilità: etichetta se è certa, menu a tendina se è ambigua."""
+        generation = self._state.generation
+        if len(candidates) == 1:
+            label = QLabel(f"Abilità: {candidates[0].display_name}", parent)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setStyleSheet("color: #b8b8c8; font-size: 11px;")
+            return label
+
+        box = QComboBox(parent)
+        box.addItem("Abilità: ?", None)
+        for ability in candidates:
+            box.addItem(ability.display_name, ability.identifier)
+        box.setCurrentIndex(
+            next(
+                (i for i in range(box.count()) if box.itemData(i) == applied),
+                0,
+            )
+        )
+        box.setStyleSheet("font-size: 11px;")
+        # Segnala che il profilo mostrato può essere sbagliato: senza questo
+        # l'utente non ha modo di sapere che una delle abilità possibili
+        # cambierebbe il verdetto.
+        unknown = uncertain_abilities(applied, candidates, generation)
+        if unknown:
+            names = ", ".join(a.display_name for a in unknown)
+            box.setToolTip(f"Cambierebbero l'efficacia: {names}")
+            box.setStyleSheet("font-size: 11px; border: 1px solid #e0c060;")
+        box.currentIndexChanged.connect(
+            lambda index, pid=pokemon_id, widget=box: self.abilityPinned.emit(
+                pid, widget.itemData(index)
+            )
+        )
+        return box
 
     def _load_sprite_pixmap(self, pokemon_id: int, generation: int) -> QPixmap | None:
         """Carica lo sprite front come `QPixmap`, se disponibile su disco."""
@@ -233,6 +282,40 @@ class OpponentPanel(QWidget):
 # ---------------------------------------------------------------------------
 
 
+def resolve_ability(candidates: list, pinned: str | None) -> tuple[str | None, list]:
+    """Decide quale abilità applicare, e cosa resta incerto.
+
+    Ritorna `(identifier applicato, candidati ancora possibili)`:
+
+    - un solo candidato → è certa, si applica senza chiedere nulla;
+    - scelta fissata dall'utente e ancora fra i candidati → si applica quella;
+    - più candidati e nessuna scelta → non si applica niente, e la lista
+      restituita serve a segnalare l'incertezza.
+
+    Una scelta fissata che non compare fra i candidati viene ignorata: succede
+    cambiando generazione, dove l'abilità può non essere disponibile.
+    """
+    if not candidates:
+        return None, []
+    identifiers = [ability.identifier for ability in candidates]
+    if pinned is not None and pinned in identifiers:
+        return pinned, candidates
+    if len(candidates) == 1:
+        return identifiers[0], candidates
+    return None, candidates
+
+
+def uncertain_abilities(applied: str | None, candidates: list, generation: int) -> list:
+    """Candidati che cambierebbero l'efficacia ma non sono stati applicati.
+
+    Se la lista non è vuota, il profilo mostrato può essere sbagliato e va
+    segnalato: è la differenza fra "non lo so" e "so che non conta".
+    """
+    if applied is not None:
+        return []
+    return [a for a in candidates if modifies_effectiveness(a.identifier, generation)]
+
+
 def _separator(parent: QWidget) -> QFrame:
     line = QFrame(parent)
     line.setFrameShape(QFrame.Shape.HLine)
@@ -241,7 +324,9 @@ def _separator(parent: QWidget) -> QFrame:
     return line
 
 
-def _render_effectiveness_html(defender_types: tuple[str, ...], generation: int) -> str:
+def _render_effectiveness_html(
+    defender_types: tuple[str, ...], generation: int, ability: str | None = None
+) -> str:
     """Efficacia difensiva a colonna: una riga per tipo (badge + moltiplicatore).
 
     Struttura: sezioni "Debolezze" / "Resistenze" / "Immune" ognuna con una
@@ -252,6 +337,8 @@ def _render_effectiveness_html(defender_types: tuple[str, ...], generation: int)
     """
     engine = EffectivenessEngine(generation)
     profile = engine.defensive_profile(list(defender_types))
+    if ability is not None:
+        profile = apply_ability(profile, ability, generation)
 
     weak = sorted(
         ((t, m) for t, m in profile.items() if m > 1),
