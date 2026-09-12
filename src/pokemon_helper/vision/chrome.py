@@ -14,6 +14,11 @@ schermate del gioco no — cielo, erba, teal del menu Pokemon, blu dei dialoghi
 sono tutte sature. Si scende dall'alto finché le righe restano grigie e chiare,
 e la prima che non lo è segna l'inizio del gioco.
 
+La fascia non parte dalla riga 0: il frame comincia con il bordo della
+finestra, che è scuro. Le prime righe non grigie sono quindi tollerate, entro
+`MAX_LEADING_BORDER`, e contate comunque come chrome — quel che serve è dove
+il gioco *comincia*, non dove comincia la barra del titolo.
+
 Limiti noti, entrambi risolti ripiegando sul valore dichiarato nel layout:
 
 - **Tema scuro**: con una barra del titolo quasi nera il vincolo di luminosità
@@ -43,8 +48,11 @@ MIN_CHROME_HEIGHT = 16
 MAX_CHROME_HEIGHT = 120
 # Distanza massima fra canale più alto e più basso perché un pixel sia grigio.
 # Le superfici di sistema non sono perfettamente neutre (l'accento colora
-# leggermente alcuni temi), quindi la soglia non è a zero.
-MAX_CHANNEL_SPREAD = 24
+# leggermente alcuni temi), quindi la soglia non è a zero — ma resta stretta:
+# la prima riga del campo di battaglia FRLG è un verde pallidissimo
+# `(231, 255, 231)`, distanza 24, e con una soglia più larga passerebbe per
+# chrome portandosi dietro tutta la fascia di cielo sopra il campo.
+MAX_CHANNEL_SPREAD = 12
 # Luminosità minima: esclude le bande nere di letterbox, che sarebbero grigie
 # a tutti gli effetti.
 MIN_BRIGHTNESS = 100
@@ -54,6 +62,11 @@ MIN_NEUTRAL_FRACTION = 0.8
 # Frazione di larghezza ignorata sui due lati: bordi della finestra e angoli
 # arrotondati di Win11, che nel frame arrivano trasparenti e quindi neri.
 SIDE_MARGIN_FRACTION = 0.1
+# Righe non grigie tollerate prima dell'inizio del chrome. Il frame di Windows
+# Graphics Capture comincia con il bordo della finestra: sulla macchina di
+# sviluppo è una riga scura `(43, 43, 43)`, e pretendere il grigio già dalla
+# riga 0 faceva fallire la misura su ogni cattura reale.
+MAX_LEADING_BORDER = 4
 
 # Valori già segnalati, per non ripetere la riga di log a ogni poll (due volte
 # al secondo con l'auto-detect acceso).
@@ -83,14 +96,26 @@ def detect_chrome_height(image: Image.Image) -> int | None:
     neutral = (spread <= MAX_CHANNEL_SPREAD) & (brightness >= MIN_BRIGHTNESS)
     is_chrome = neutral.mean(axis=1) >= MIN_NEUTRAL_FRACTION
 
-    if not is_chrome[0] or is_chrome.all():
-        # Niente chrome in cima, oppure chrome fin dove abbiamo guardato:
-        # in entrambi i casi non stiamo guardando una finestra emulatore.
+    if not is_chrome.any():
+        return None
+    # `argmax` trova il primo `True`: l'inizio della barra del titolo, appena
+    # sotto il bordo della finestra.
+    start = int(np.argmax(is_chrome))
+    if start > MAX_LEADING_BORDER:
+        # Troppe righe non grigie in cima: non è un bordo, non stiamo
+        # guardando una finestra con chrome.
         return None
 
-    # `argmin` su un array di booleani trova il primo `False`, cioè la prima
-    # riga che appartiene già al gioco.
-    detected = int(np.argmin(is_chrome))
+    rest = is_chrome[start:]
+    if rest.all():
+        # Chrome fin dove abbiamo guardato: o è uno schermo tutto chiaro, o
+        # non è una finestra emulatore. In entrambi i casi non si misura.
+        return None
+
+    # `argmin` trova il primo `False`, cioè la prima riga già del gioco. Il
+    # bordo iniziale fa parte del chrome quanto la barra del titolo, quindi
+    # l'offset è assoluto e non relativo a `start`.
+    detected = start + int(np.argmin(rest))
     if detected < MIN_CHROME_HEIGHT:
         return None
     return detected
