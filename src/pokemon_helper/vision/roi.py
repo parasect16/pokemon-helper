@@ -156,12 +156,22 @@ ROIS_FIRERED = GameRois(
     # HP che vive più in basso). Box alto, quindi tollerava lo sfasamento del
     # chrome anche prima di questa correzione.
     player_name=Roi(x=0.546, y=0.462, w=0.412, h=0.085),
-    # Sprite posteriore del giocatore in basso-sinistra: allargato verso
-    # destra rispetto alla prima calibrazione per includere la parte destra
-    # dello sprite che sporgeva oltre il ROI iniziale.
-    player_sprite=Roi(x=0.077, y=0.454, w=0.371, h=0.320),
-    # Barra HP giocatore: barra colorata "PS ▬▬▬" (prima dei numeri assoluti).
-    player_hp_bar=Roi(x=0.639, y=0.593, w=0.268, h=0.029),
+    # Sprite posteriore del giocatore in basso-sinistra. Ricalibrato su cattura
+    # 1119x734 misurando i pixel dello sprite: il box precedente arrivava a
+    # y nativa 124, cioè dentro il box messaggi (che comincia a 112), e
+    # partiva 30 px nativi a sinistra dello sprite.
+    #
+    # Questo è lo slot 64x64 nativo in cui la Gen 3 disegna gli sprite
+    # posteriori, ancorato in basso al bordo del campo: x 40-104, y 48-112.
+    # Prenderlo intero invece di ritagliare il singolo Pokemon è voluto — le
+    # reference indicizzate sono anch'esse 64x64, quindi crop e reference
+    # hanno la stessa inquadratura.
+    player_sprite=Roi(x=0.167, y=0.300, w=0.267, h=0.400),
+    # Barra HP giocatore: la barra colorata, esclusi sia la label "PS" a
+    # sinistra sia i numeri PS sotto. Il box precedente cadeva proprio sui
+    # numeri (y nativa 95-99): la barra vive a 90-95, misurata sulla stessa
+    # cattura seguendo il rosso del riempimento e il grigio della traccia.
+    player_hp_bar=Roi(x=0.718, y=0.563, w=0.208, h=0.032),
     # --- Menu Pokemon ---
     # Layout Rosso Fuoco: slot 0 grande a sinistra (Pokemon "attivo"), slot 1-5
     # righe compatte a destra. `slot_areas` è tight sul nome, `slot_levels`
