@@ -64,7 +64,11 @@ class GameLayout:
     # solo il client area) su Win10/11, quindi va sottratto il titolo (~30 px
     # a DPI 100%, 37 a 125%) più il menu bar mGBA (~25 px). Misurato 52 px
     # sulla macchina di sviluppo dell'utente (Win10 Pro 10.0.19045).
-    # TODO: auto-detect chrome via scansione riga teal iniziale sul frame.
+    #
+    # Resta il valore di riferimento, ma non è più l'unica sorgente: a runtime
+    # `vision.chrome.resolve_layout` lo misura sul frame catturato, perché su
+    # Win11 o a DPI diversa la barra del titolo ha un'altra altezza. Questo
+    # numero è il fallback di quando la misura non è attendibile.
     menu_offset_top: int = 52
 
 

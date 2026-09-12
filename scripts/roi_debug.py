@@ -19,6 +19,7 @@ from pathlib import Path
 from PIL import ImageDraw
 
 from pokemon_helper.vision.capture import CaptureError, WindowCapture
+from pokemon_helper.vision.chrome import detect_chrome_height, resolve_layout
 from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
 
 
@@ -43,6 +44,12 @@ def main() -> int:
     out_dir = Path(__file__).resolve().parent.parent / "data"
     frame.image.save(out_dir / "capture-test.png")
     print(f"[frame] {frame.width}x{frame.height}")
+
+    # Il chrome misurato è il primo sospetto quando le ROI cadono fuori posto:
+    # stamparlo accanto al valore dichiarato dice subito se il problema è lì.
+    measured = detect_chrome_height(frame.image)
+    layout = resolve_layout(frame.image, layout)
+    print(f"[chrome] misurato={measured} usato={layout.menu_offset_top}")
 
     game_area = compute_game_area(frame.width, frame.height, layout)
     print(f"[game_area] x={game_area.x} y={game_area.y} w={game_area.w} h={game_area.h}")

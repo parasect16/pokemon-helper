@@ -310,6 +310,7 @@ def _init_recognize_hotkey(
         )
         from pokemon_helper.vision.battle_watcher import BattleEvent, BattleWatcher
         from pokemon_helper.vision.capture import CaptureError, WindowCapture
+        from pokemon_helper.vision.chrome import resolve_layout
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
         from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
@@ -360,6 +361,9 @@ def _init_recognize_hotkey(
                 return
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
+            # Il chrome della finestra dipende da Windows e dal DPI, non dal
+            # gioco: si misura sul frame invece di fidarsi del valore nel layout.
+            layout = resolve_layout(frame.image, layout)
 
             # Guard: se la barra HP avversario non ha pixel HP-colored, non
             # siamo in battaglia — non aggiornare l'avversario per evitare
@@ -420,6 +424,7 @@ def _init_recognize_hotkey(
                 return
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
+            layout = resolve_layout(frame.image, layout)
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
                 results = recognizer.recognize_team(
@@ -486,6 +491,7 @@ def _init_recognize_hotkey(
             frame = capture.capture_frame(timeout_seconds=3.0).image
         except CaptureError, TimeoutError:
             return False, None
+        layout = resolve_layout(frame, layout)
         # L'elenco Pokemon si apre *durante* la lotta per cambiare Pokemon:
         # non dice nulla sul combattimento, quindi non va letto come "finito".
         if is_party_menu_screen(frame, layout):
