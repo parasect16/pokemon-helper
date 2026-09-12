@@ -105,7 +105,7 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 - **Livello non mostrato con alterazione di stato**: se il Pokemon è avvelenato/paralizzato/ecc. il gioco disegna il badge di stato al posto di `L.XX`. `read_level` ritorna `None` e lo slot conserva il livello precedente, editabile via `…`. (La lettura del livello in sé è risolta: vedi `vision/level_reader.py`.)
 - **Match icona menu Pokemon**: pHash/dhash rumorosi anche col color-key HSV. Oggi conta poco: l'OCR nome rec-only riconosce tutti gli slot, quindi il fallback icona non viene quasi mai raggiunto.
 - **Chrome mGBA**: non è più un numero fisso. `vision/chrome.py` misura la fascia sul frame catturato (titolo e menu bar sono righe grigie e chiare, le schermate di gioco sono sature) e i 52 px del layout restano il fallback. Con un tema scuro la misura non passa e si ripiega sul fallback: il nero è escluso di proposito, perché è anche il colore delle bande di letterbox.
-- **ROI hardcoded**: solo FRLG a scala mGBA. Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi. Parzialmente coperto da `extract_roi_from_annotated.py` (offline).
+- **ROI hardcoded**: solo FRLG a scala mGBA. Quelle di combattimento sono state verificate su cattura live (le due del lato giocatore ricalibrate misurando i pixel). Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi. Parzialmente coperto da `extract_roi_from_annotated.py` (offline).
 - **pHash sprite in combattimento**: inservibile. La cattura ha campo e cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la specie corretta non entra nei primi tre a nessun offset di ROI (Weezing a distanza 20-24 mentre specie sbagliate stanno a 14-16). Il verdetto regge interamente sul nome.
 - **Abilità ambigue**: molte specie ne ammettono più d'una e dallo sprite non si distinguono. Il filtro per generazione ne risolve circa metà in Gen 3, meno in Gen 5. Per il resto il pannello non applica nulla e segnala il dubbio, e l'abilità si fissa a mano dal menu sulla card.
 - **Abilità storiche**: veekun pubblica solo l'assegnazione corrente. `ABILITY_HISTORY_OVERRIDES` copre Gengar (che ha perso Levitazione in Gen 7); altri casi eventuali vanno aggiunti lì a mano.
@@ -131,10 +131,6 @@ in poi sono estensioni, non completamento.
    su bianco. I fondali di battaglia sono a bande piatte, quindi un flood-fill
    dai bordi è plausibile. Recupererebbe il secondo segnale, oggi portato
    interamente dal nome.
-5. **ROI `player_sprite` / `player_hp_bar`**: ancora mal centrate, per un
-   errore di calibrazione loro indipendente dal chrome. Impatto basso finché
-   il pHash resta inservibile (vedi sopra). ~1h con una cattura di
-   riferimento.
 
 ## 8. Convenzioni rapide
 

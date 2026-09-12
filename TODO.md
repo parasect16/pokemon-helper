@@ -60,14 +60,13 @@ Convenzioni:
 
 ## Da fare — polish / feature
 
-- `[ ]` **ROI `player_sprite` e `player_hp_bar` ancora storte**. La
-  riproiezione di `1f85b1e` ha corretto la componente chrome, ma la
-  calibrazione originale di queste due era sbagliata di suo: nell'overlay
-  `player_sprite` taglia la testa dello sprite e include il box messaggi,
-  `player_hp_bar` cade sotto la barra verde sopra i numeri PS. Nessun codice
-  usa `player_hp_bar` oggi (solo `roi_debug.py` la disegna), quindi è
-  innocua; `player_sprite` degrada solo il canale pHash, che in battaglia è
-  già inutilizzabile (voce sotto).
+- `[x]` **ROI `player_sprite` e `player_hp_bar`** ricalibrate misurando i
+  pixel su cattura 1119x734, non a occhio. `player_hp_bar` stava sui numeri
+  PS (y nativa 95-99) invece che sulla barra (90-95). `player_sprite`
+  arrivava a y nativa 124, dentro il box messaggi che comincia a 112, e
+  partiva 30 px a sinistra dello sprite: ora è lo slot 64x64 in cui la Gen 3
+  disegna gli sprite posteriori (x 40-104, y 48-112), la stessa inquadratura
+  delle reference indicizzate.
 
 - `[!]` **pHash sprite inutilizzabile in battaglia**. La cattura ha campo e
   cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la
@@ -95,15 +94,18 @@ Convenzioni:
 - `[x]` **Nickname map utente** (commit 13dd606): dialog 🏷 per associare
   nickname → species, salvato in `state.json`. Team recognize usa mappa
   prima del fuzzy match.
-- `[~]` **Auto-detect chrome mGBA** (`vision/chrome.py`). Il chrome si misura
+- `[x]` **Auto-detect chrome mGBA** (`vision/chrome.py`). Il chrome si misura
   sul frame: titolo e menu bar sono righe grigie e chiare, le schermate di
   gioco sono sature. Il nero è escluso di proposito — è anche il colore delle
   bande di letterbox, e contarle sposterebbe l'area di gioco. Fallback al
   valore dichiarato nel layout quando la misura non convince (tema scuro,
   schermo bianco in transizione). Usato da `on_recognize`, `on_recognize_team`
   e `probe`.
-  **Da verificare sul vivo**: `python scripts/roi_debug.py` stampa
-  `[chrome] misurato=... usato=...`; sulla macchina attuale deve dire 52.
+  **Verificato sul vivo**: 52 px, identico al valore misurato a mano. La
+  prima cattura però dava `None`, e ha scoperto due assunzioni sbagliate: il
+  frame comincia col bordo della finestra (una riga scura, non la barra del
+  titolo) e la prima riga del campo FRLG è `(231, 255, 231)`, distanza fra
+  canali esattamente 24, che passava per grigia.
 
 ## Da fare — infra
 
