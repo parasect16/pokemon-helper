@@ -82,9 +82,12 @@ Convenzioni:
   Sblocca giochi non supportati senza toccare codice.
 - `[ ]` **Supporto Pokemon Cristallo** (Gen 2 mGBA). Nuove ROI, layout GB/GBC
   (160×144, aspect 10:9), aggiungere `LAYOUT_MGBA_GB` in `_GAME_BY_GENERATION`.
-- `[ ]` **Test UI** con `pytest-qt`. Coverage ora 0 su `ui/`. Focus
-  `TeamPanel.replace_team`, `OpponentPanel.set_active_player`,
-  `state.StateStore` (già coperto).
+- `[x]` **Test UI** con `pytest-qt`. Coverage `ui/` da 0 a 65%: pannelli,
+  finestra, dialoghi, poller F4 e worker persistente. I widget si costruiscono
+  davvero su piattaforma `offscreen`. Restano scoperti `run()` (assembla l'app
+  intera) e `hotkey.py` (pynput). Un bug trovato scrivendoli: aprendo `…` su
+  uno slot già assegnato la ricerca era pre-compilata ma la lista no, e un OK
+  immediato riassegnava lo slot al primo Pokemon dell'elenco.
 - `[ ]` **Screen mode detection formale**: euristica attuale (≥3 slot
   OCR-leggibili) può fallire. Meglio: OCR di elemento unico del menu (es.
   pulsante "ESCI" bottom-right) come sentinella.
@@ -92,10 +95,15 @@ Convenzioni:
 - `[x]` **Nickname map utente** (commit 13dd606): dialog 🏷 per associare
   nickname → species, salvato in `state.json`. Team recognize usa mappa
   prima del fuzzy match.
-- `[ ]` **Auto-detect chrome mGBA**: `LAYOUT_MGBA_GBA.menu_offset_top=52`
-  hardcoded per Win10 Pro DPI 100%. Su Win11 o DPI diverse cambia. Fix:
-  scan prima riga teal (bg gioco) sul frame catturato per calcolare offset
-  dinamicamente. ~1h.
+- `[~]` **Auto-detect chrome mGBA** (`vision/chrome.py`). Il chrome si misura
+  sul frame: titolo e menu bar sono righe grigie e chiare, le schermate di
+  gioco sono sature. Il nero è escluso di proposito — è anche il colore delle
+  bande di letterbox, e contarle sposterebbe l'area di gioco. Fallback al
+  valore dichiarato nel layout quando la misura non convince (tema scuro,
+  schermo bianco in transizione). Usato da `on_recognize`, `on_recognize_team`
+  e `probe`.
+  **Da verificare sul vivo**: `python scripts/roi_debug.py` stampa
+  `[chrome] misurato=... usato=...`; sulla macchina attuale deve dire 52.
 
 ## Da fare — infra
 
