@@ -1,4 +1,7 @@
-"""Fixture condivise per i test del pacchetto `data`.
+"""Fixture condivise a tutta la suite.
+
+Vive nella root di `tests/` perché il repository in-memory serve sia ai test
+di `data/` sia a quelli di `ui/`, che costruiscono widget sopra di esso.
 
 Costruisce un database SQLite in-memory popolato con un piccolo insieme di
 Pokemon rappresentativo dei casi che ci interessano coprire nei test:

@@ -1,28 +1,26 @@
-"""Test delle funzioni pure di `ui.opponent_panel`.
+"""Test di `ui.opponent_panel`.
 
-Coprono la decisione "quale abilità applicare e cosa resta incerto", che è
-logica di dominio anche se vive accanto ai widget. Nessun Qt viene istanziato.
+Coprono la decisione "quale abilità applicare e cosa resta incerto" — logica
+di dominio anche se vive accanto ai widget — e il pannello vero, che a
+seconda di cosa sa mostra un placeholder o le due card affiancate.
+
+La fixture `qapp` arriva da pytest-qt; la piattaforma offscreen la imposta
+`conftest.py`.
 """
 
 from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QComboBox
+from PySide6.QtWidgets import QComboBox, QLabel
 
 from pokemon_helper.data.models import Ability
 from pokemon_helper.ui.opponent_panel import (
+    OpponentPanel,
     _sync_combo_tooltip,
     resolve_ability,
     uncertain_abilities,
 )
-
-
-@pytest.fixture(scope="module")
-def qapp():
-    """QApplication condivisa: i widget Qt non si costruiscono senza."""
-    app = QApplication.instance() or QApplication([])
-    yield app
 
 
 def _ability(identifier: str, slot: int = 1) -> Ability:
@@ -136,3 +134,109 @@ def test_an_item_without_description_clears_the_tooltip(qapp) -> None:
     box.setCurrentIndex(2)
     _sync_combo_tooltip(box)
     assert box.toolTip() == ""
+
+
+# --- pannello ---
+
+
+def _labels(panel: OpponentPanel) -> list[str]:
+    """Testo delle QLabel del contenuto corrente.
+
+    Si guarda `_content` e non l'intero pannello perché il contenuto
+    precedente viene rimosso con `deleteLater()`: resta figlio finché
+    l'event loop non lo smaltisce, e `findChildren` lo troverebbe ancora.
+    """
+    return [label.text() for label in panel._content.findChildren(QLabel)]
+
+
+def _combos(panel: OpponentPanel) -> list[QComboBox]:
+    """Menu a tendina del contenuto corrente (stesso motivo di `_labels`)."""
+    return panel._content.findChildren(QComboBox)
+
+
+@pytest.fixture
+def opponent_panel(qtbot, repository, state) -> OpponentPanel:
+    panel = OpponentPanel(repository, state)
+    qtbot.addWidget(panel)
+    return panel
+
+
+def test_without_a_battle_the_panel_shows_a_placeholder(opponent_panel) -> None:
+    assert any("Combattimento non in corso" in text for text in _labels(opponent_panel))
+
+
+def test_an_opponent_without_a_known_player_asks_for_a_recognize(opponent_panel) -> None:
+    """Senza sapere chi è in campo la tabella matchup non si può calcolare."""
+    opponent_panel.set_opponent(4)
+    assert any("Player in campo sconosciuto" in text for text in _labels(opponent_panel))
+
+
+def test_both_sides_known_renders_the_two_cards(opponent_panel) -> None:
+    opponent_panel.set_opponent(4)  # Charmander
+    opponent_panel.set_active_player(1)  # Bulbasaur
+
+    texts = _labels(opponent_panel)
+    assert "Charmander" in texts
+    assert "Bulbasaur" in texts
+    assert not any("Combattimento non in corso" in text for text in texts)
+
+
+def test_a_pokemon_missing_from_the_dataset_falls_back_to_a_placeholder(opponent_panel) -> None:
+    opponent_panel.set_opponent(9999)
+    opponent_panel.set_active_player(1)
+    assert any("Dati incompleti" in text for text in _labels(opponent_panel))
+
+
+def test_a_pokemon_without_types_in_that_generation_is_incomplete(opponent_panel) -> None:
+    """Chikorita in Gen 1: esiste come riga, ma non ha tipi da confrontare."""
+    opponent_panel.set_opponent(152)
+    opponent_panel.set_active_player(1)
+    assert any("Dati incompleti" in text for text in _labels(opponent_panel))
+
+
+def test_clearing_the_opponent_goes_back_to_the_placeholder(opponent_panel) -> None:
+    opponent_panel.set_opponent(4)
+    opponent_panel.set_active_player(1)
+    opponent_panel.set_opponent(None)
+    assert any("Combattimento non in corso" in text for text in _labels(opponent_panel))
+
+
+def test_a_single_ability_is_shown_as_plain_text(opponent_panel, state) -> None:
+    """Gastly ha solo Levitazione: niente da scegliere, quindi niente menu."""
+    state.generation = 3
+    opponent_panel.apply_state(state)
+    opponent_panel.set_opponent(92)
+    opponent_panel.set_active_player(1)
+
+    assert any("Levitazione" in text for text in _labels(opponent_panel))
+    assert _combos(opponent_panel) == []
+
+
+def test_an_ambiguous_ability_becomes_a_combo_that_pins_the_choice(
+    opponent_panel, state, qtbot
+) -> None:
+    """Magnemite in Gen 4 ne ammette due: l'utente fissa quella vista in battaglia."""
+    state.generation = 4
+    opponent_panel.apply_state(state)
+    opponent_panel.set_opponent(81)
+    opponent_panel.set_active_player(92)
+
+    combos = _combos(opponent_panel)
+    assert len(combos) == 1
+    box = combos[0]
+
+    with qtbot.waitSignal(opponent_panel.abilityPinned) as blocker:
+        box.setCurrentIndex(1)
+    assert blocker.args[0] == 81
+    assert blocker.args[1] == box.itemData(1)
+
+
+def test_a_pinned_ability_comes_back_selected(opponent_panel, state) -> None:
+    state.generation = 4
+    state.abilities[81] = "motor-drive"
+    opponent_panel.apply_state(state)
+    opponent_panel.set_opponent(81)
+    opponent_panel.set_active_player(92)
+
+    box = _combos(opponent_panel)[0]
+    assert box.currentData() == "motor-drive"
