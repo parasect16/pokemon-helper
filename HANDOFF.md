@@ -1,6 +1,6 @@
 # HANDOFF — pokemon-helper
 
-Passaggio per nuova sessione o nuovo collaboratore. Stato al **2026-09-12**.
+Passaggio per nuova sessione o nuovo collaboratore. Stato al **2026-09-15**.
 
 Vedi [`PLAN.md`](PLAN.md) per roadmap, [`CLAUDE.md`](CLAUDE.md) per convenzioni.
 
@@ -9,8 +9,8 @@ Vedi [`PLAN.md`](PLAN.md) per roadmap, [`CLAUDE.md`](CLAUDE.md) per convenzioni.
 Tool desktop Windows. Affianca emulatore Pokemon Gen 1-5 con pannello sempre in primo piano. Funzionalità:
 
 - **Squadra manuale**: 6 slot nome + livello, generazione selezionabile. Persistenza in `%APPDATA%\pokemon-helper\state.json`.
-- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR nome (il canale pHash sprite esiste ma in battaglia è inservibile, vedi §6), in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione). Guardia `is_battle_screen` blocca l'update se la ROI HP avversario non ha pixel colore-HP (schermata non-battaglia → warning ⚠).
-- **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR nome per ciascuno dei 6 slot con fuzzy match, livello letto cifra per cifra da `vision/level_reader.py`, sovrascrive `state.team`. Guard doppia: <3/6 slot leggibili o stesso pokemon_id in ≥2 slot → aggiornamento bloccato.
+- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR nome (il canale pHash sprite esiste ma in battaglia è inservibile, vedi §6), in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione). Guardia `classify_screen` blocca l'update se la schermata non è quella di combattimento — la ROI HP avversario senza pixel colore-HP (warning ⚠, motivo in tooltip).
+- **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR nome per ciascuno dei 6 slot con fuzzy match, livello letto cifra per cifra da `vision/level_reader.py`, sovrascrive `state.team`. Guard doppia: prima `classify_screen` deve leggere il pulsante `ESCI` in basso a destra (schermata sbagliata → nessuna delle 12 OCR sugli slot parte), poi la lettura deve essere coerente — <3/6 slot leggibili o stesso pokemon_id in ≥2 slot → aggiornamento bloccato.
 - **Mappa nickname** (pulsante `🏷`): dialog per associare nickname custom (es. "FIAMMETTA") a un pokemon_id, usata sia dal riconoscimento squadra sia da quello del player in battaglia. Il nickname si scrive come appare nel gioco: il confronto è fuzzy e assorbe gli errori OCR. Persistita in `state.json`.
 - **OpponentPanel**: due card affiancate (player | avversario) con sprite Pokedex, nome, tipi, abilità e tabella efficacia difensiva colorata (Debolezze / Resistenze / Immune, neutri esclusi).
 - **Abilità**: l'efficacia tiene conto delle abilità che la modificano — contro un Gengar con Levitazione, Terra risulta `0×` e non `2×`. Quando il dataset ammette una sola abilità per quella generazione viene applicata da sola; con più candidati un menu a tendina permette di fissare quella vista in battaglia, e la scelta è persistita per specie. Il menu è evidenziato solo se l'ambiguità può davvero cambiare il verdetto. Tooltip con la descrizione dell'abilità in italiano.
@@ -45,7 +45,8 @@ Requisiti: Python 3.14 (pin in `.python-version`), Windows 10/11, mGBA per ricon
 src/pokemon_helper/
   engine/           # F1: type chart, EffectivenessEngine, matchup helpers.
   data/             # F0.1: SQLite schema, models, PokemonRepository.
-  vision/           # F0.2 + F3: capture, chrome, ROI, OCR, sprite hash, recognizer.
+  vision/           # F0.2 + F3: capture, chrome, ROI, OCR, sprite hash, recognizer,
+                    #            screen_mode (battaglia / elenco Pokemon / altro).
   ui/               # F2: overlay Qt, TeamPanel, OpponentPanel, hotkey, state.
   __main__.py       # CLI entry-point → ui.app.run
 
@@ -67,7 +68,7 @@ scripts/
   extract_roi_from_annotated.py  # bbox per colore da PNG annotato → coord Roi
 
 tests/
-  engine/ data/ ui/ vision/  # pytest, 380 test. engine+data al 100%, ui/ al 65%.
+  engine/ data/ ui/ vision/  # pytest, 395 test. engine+data al 100%, ui/ al 76%.
 
 data/                        # gitignored (eccetto la struttura)
   vendor/pokedex/            # shallow clone veekun (CSV Pokedex)
@@ -78,7 +79,7 @@ data/                        # gitignored (eccetto la struttura)
 ## 4. Comandi utili
 
 ```powershell
-pytest -q                            # 380 test, tutti verdi
+pytest -q                            # 395 test, tutti verdi
 pytest --cov                         # coverage con floor 90% su engine+data (oggi 100%)
 ruff check .                         # lint
 ruff format .                        # format

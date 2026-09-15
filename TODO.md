@@ -87,9 +87,17 @@ Convenzioni:
   intera) e `hotkey.py` (pynput). Un bug trovato scrivendoli: aprendo `…` su
   uno slot già assegnato la ricerca era pre-compilata ma la lista no, e un OK
   immediato riassegnava lo slot al primo Pokemon dell'elenco.
-- `[ ]` **Screen mode detection formale**: euristica attuale (≥3 slot
-  OCR-leggibili) può fallire. Meglio: OCR di elemento unico del menu (es.
-  pulsante "ESCI" bottom-right) come sentinella.
+- `[x]` **Screen mode detection formale**. `vision/screen_mode.py` (ex
+  `battle_detector`) ha un'unica porta d'ingresso, `classify_screen`, che
+  ritorna `BATTLE` / `PARTY_MENU` / `OTHER` più il motivo per il tooltip.
+  La sentinella è il pulsante `ESCI` in basso a destra dell'elenco Pokemon:
+  ROI misurata per colore su due catture live di dimensioni diverse, che
+  danno lo stesso rettangolo normalizzato a meno di 0.001. OCR: `ESCI` a
+  0.98 sul menu, spazzatura dal box messaggi sui frame di battaglia.
+  Costa un'OCR, quindi è opt-in (`ocr=`): il poll F4 gira due volte al
+  secondo e si ferma al colore. L'euristica ≥3 slot resta come seconda
+  linea — guarda cosa è stato letto, non un rettangolo, e fallisce per
+  cause diverse.
 
 - `[x]` **Nickname map utente** (commit 13dd606): dialog 🏷 per associare
   nickname → species, salvato in `state.json`. Team recognize usa mappa
@@ -131,9 +139,14 @@ Convenzioni:
 - `[ ]` `data/*.png` gitignored ma alcuni script scrivono altri file
   (`data/capture-test.png`, `data/team-menu-slot-*.png`). Se compaiono altri
   artefatti da script debug, aggiungere pattern.
-- `[ ]` Chiusura app durante recognize (raro): worker persistente può non
-  terminare pulito. `_HotkeyGroup.stop` chiama `worker.stop()` ma job in corso
-  continua fino a fine. Aggiungere check cancel/timeout.
+- `[x]` Chiusura app durante recognize. `_RecognizeWorker.stop()` ora svuota
+  la coda, rifiuta le submit successive, espone `cancelled` (controllato dai
+  job di recognize e dal poll fra una fase e l'altra) e aspetta il thread con
+  timeout, stampando se scade. La cattura si chiude **prima** del worker: la
+  sua `close()` sblocca subito una `capture_frame` in attesa invece di
+  lasciarla scadere a 3 s. Perché regga, `close()` è diventata definitiva —
+  prima era indistinguibile dalla sessione che muore con l'emulatore, caso
+  che riapre apposta, quindi un job in volo ne avviava una nuova uscendo.
 
 ## Note libere
 
