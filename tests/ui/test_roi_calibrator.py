@@ -15,6 +15,7 @@ from PIL import Image
 from PySide6.QtCore import QPoint, Qt
 
 from pokemon_helper.ui.roi_calibrator import (
+    CalibrationFrame,
     RoiCalibratorDialog,
     fit_zoom_percent,
     format_native_rect,
@@ -28,7 +29,12 @@ from pokemon_helper.vision.roi import (
     compute_game_area,
     roi_to_pixels,
 )
-from pokemon_helper.vision.roi_targets import TARGETS, get_roi
+from pokemon_helper.vision.roi_targets import (
+    SCREEN_BATTLE,
+    SCREEN_PARTY_MENU,
+    TARGETS,
+    get_roi,
+)
 
 LAYOUT = LAYOUT_MGBA_GBA
 # Cattura tipica di mGBA a finestra media: chrome 52 px, niente letterbox
@@ -37,20 +43,20 @@ FRAME_SIZE = (1119, 734)
 
 
 @pytest.fixture
-def frame() -> Image.Image:
+def image() -> Image.Image:
     """Frame finto ma delle dimensioni giuste: la geometria è ciò che conta."""
     arr = np.full((FRAME_SIZE[1], FRAME_SIZE[0], 3), (40, 80, 120), dtype=np.uint8)
     return Image.fromarray(arr, mode="RGB")
 
 
 @pytest.fixture
+def frame(image) -> CalibrationFrame:
+    return CalibrationFrame(image=image, layout=LAYOUT, screen=SCREEN_BATTLE)
+
+
+@pytest.fixture
 def dialog(qtbot, frame) -> RoiCalibratorDialog:
-    widget = RoiCalibratorDialog(
-        frame=frame,
-        layout=LAYOUT,
-        rois=ROIS_FIRERED,
-        game_key="firered",
-    )
+    widget = RoiCalibratorDialog(frame=frame, rois=ROIS_FIRERED, game_key="firered")
     qtbot.addWidget(widget)
     return widget
 
@@ -62,18 +68,18 @@ def _game_area():
 # --------------------------------------------------------------- conversione
 
 
-def test_a_pil_frame_becomes_a_qimage_of_the_same_size(frame) -> None:
-    image = pil_to_qimage(frame)
+def test_a_pil_frame_becomes_a_qimage_of_the_same_size(image) -> None:
+    converted = pil_to_qimage(image)
 
-    assert (image.width(), image.height()) == FRAME_SIZE
-    assert not image.isNull()
+    assert (converted.width(), converted.height()) == FRAME_SIZE
+    assert not converted.isNull()
 
 
-def test_the_qimage_owns_its_pixels(frame) -> None:
+def test_the_qimage_owns_its_pixels(image) -> None:
     """Senza la copia, i byte del PIL spariscono e resta spazzatura."""
-    image = pil_to_qimage(frame)
+    converted = pil_to_qimage(image)
 
-    assert image.pixelColor(10, 10).getRgb()[:3] == (40, 80, 120)
+    assert converted.pixelColor(10, 10).getRgb()[:3] == (40, 80, 120)
 
 
 # ------------------------------------------------------------------ disegno
@@ -266,7 +272,6 @@ def test_reset_uses_the_defaults_it_was_given(qtbot, frame) -> None:
     """Con una calibrazione già salvata, `Ripristina` torna ai valori del repo."""
     saved = RoiCalibratorDialog(
         frame=frame,
-        layout=LAYOUT,
         rois=ROIS_FIRERED,
         game_key="firered",
         defaults=ROIS_FIRERED,
@@ -285,7 +290,7 @@ def test_a_new_frame_keeps_the_rectangles(dialog, frame) -> None:
     """Ricatturare per passare all'altra schermata non azzera il lavoro fatto."""
     dialog._on_roi_drawn("opponent_name", Roi(x=0.25, y=0.25, w=0.1, h=0.1))
 
-    dialog.set_frame(frame, LAYOUT)
+    dialog.set_frame(frame)
 
     assert get_roi(dialog.rois(), "opponent_name") == Roi(x=0.25, y=0.25, w=0.1, h=0.1)
 
@@ -315,3 +320,88 @@ def test_the_fit_never_goes_below_the_minimum_zoom() -> None:
 
 def test_the_dialog_opens_already_fitted(dialog) -> None:
     assert dialog._canvas.zoom == pytest.approx(0.8)
+
+
+# ------------------------------------------------------------------ cattura
+
+
+def test_without_a_source_the_capture_button_is_off(dialog) -> None:
+    """Un dialogo costruito su un frame e basta non ha nulla da ricatturare."""
+    assert not dialog._capture_button.isEnabled()
+
+
+def test_capturing_replaces_the_frame_and_keeps_the_work(qtbot, image, frame) -> None:
+    menu_frame = CalibrationFrame(image=image, layout=LAYOUT, screen=SCREEN_PARTY_MENU)
+    dialog = RoiCalibratorDialog(
+        frame=frame,
+        rois=ROIS_FIRERED,
+        game_key="firered",
+        frame_source=lambda: menu_frame,
+    )
+    qtbot.addWidget(dialog)
+    dialog._on_roi_drawn("opponent_name", Roi(x=0.25, y=0.25, w=0.1, h=0.1))
+
+    dialog._capture_button.click()
+
+    assert "elenco Pokemon" in dialog._screen_banner.text()
+    assert get_roi(dialog.rois(), "opponent_name") == Roi(x=0.25, y=0.25, w=0.1, h=0.1)
+
+
+def test_a_failed_capture_is_reported_and_keeps_the_old_frame(qtbot, frame) -> None:
+    """Emulatore chiuso a metà calibrazione: si dice, non si perde il frame."""
+
+    def boom() -> CalibrationFrame:
+        raise RuntimeError("finestra mGBA non trovata")
+
+    dialog = RoiCalibratorDialog(
+        frame=frame, rois=ROIS_FIRERED, game_key="firered", frame_source=boom
+    )
+    qtbot.addWidget(dialog)
+
+    dialog._capture_button.click()
+
+    assert "Cattura fallita" in dialog._screen_banner.text()
+    assert "mGBA" in dialog._screen_banner.toolTip()
+    assert dialog._canvas.game_area.w > 0
+
+
+# ------------------------------------------------------------------- banner
+
+
+def test_the_banner_says_which_screen_is_on_display(dialog) -> None:
+    assert dialog._screen_banner.text() == "A video: schermata di combattimento."
+
+
+def test_the_banner_warns_when_the_target_belongs_elsewhere(dialog) -> None:
+    """A video c'è il combattimento e si sta per disegnare una ROI del menu."""
+    _select_key(dialog, "party_menu_sentinel")
+
+    text = dialog._screen_banner.text()
+    assert text.startswith("⚠")
+    assert "elenco Pokemon" in text
+
+
+def test_the_banner_stops_warning_on_a_matching_target(dialog) -> None:
+    _select_key(dialog, "party_menu_sentinel")
+    _select_key(dialog, "opponent_name")
+
+    assert not dialog._screen_banner.text().startswith("⚠")
+
+
+def test_an_unrecognised_screen_is_said_plainly(qtbot, image) -> None:
+    """Overworld o transizione: nessun avviso, ma nemmeno una finta certezza."""
+    unknown = CalibrationFrame(image=image, layout=LAYOUT, screen="other", note="(0 px barra HP)")
+    dialog = RoiCalibratorDialog(frame=unknown, rois=ROIS_FIRERED, game_key="firered")
+    qtbot.addWidget(dialog)
+
+    assert "schermata non riconosciuta" in dialog._screen_banner.text()
+    assert dialog._screen_banner.toolTip() == "(0 px barra HP)"
+
+
+def _select_key(dialog: RoiCalibratorDialog, key: str) -> None:
+    """Seleziona il bersaglio con quella chiave nell'elenco."""
+    for row in range(dialog._targets_list.count()):
+        if dialog._targets_list.item(row).data(Qt.ItemDataRole.UserRole) == key:
+            dialog._targets_list.setCurrentRow(row)
+            return
+    raise AssertionError(f"bersaglio {key} non in elenco")

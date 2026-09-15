@@ -112,11 +112,19 @@ ois\<gioco>.json`, `RoiStore` load/save/clear,
     `resolve_rois` invece di leggere `GAME_ROIS`. In `app` il risultato è in
     cache per sessione: il poll F4 gira due volte al secondo e non deve
     rileggere il disco a ogni giro (il calibratore invaliderà la cache).
-  - `[ ]` **1.3 dialog di disegno** — canvas, rubber-band, snap alla griglia
-    nativa 240x160, zoom, nudge con le frecce.
-  - `[ ]` **1.4 cattura per gruppo** — le ROI di battaglia si calibrano su un
-    frame di battaglia, quelle del menu su un frame di menu; `classify_screen`
-    dice quale delle due si sta guardando.
+  - `[x]` **1.3 dialog di disegno** — `ui/roi_calibrator.py` (canvas +
+    dialogo) e `vision/roi_targets.py` (i 16 bersagli, puri). Rubber-band con
+    snap alla griglia nativa, frecce per spostare di un pixel nativo,
+    Shift+frecce per ridimensionare, zoom 50-400% con apertura già adattata.
+    Coordinate mostrate in pixel nativi, non del frame: sono le uniche
+    confrontabili con uno screenshot e con `roi.py`.
+  - `[x]` **1.4 cattura per gruppo** — pulsante "Cattura la schermata a
+    video" e riga di stato che dice cosa c'è a schermo, con ⚠ quando il
+    bersaglio selezionato si misura sull'altra schermata. La cattura arriva
+    come `frame_source` iniettata (`CalibrationFrame`: immagine + layout +
+    schermata), così il dialogo resta costruibile senza emulatore e senza gli
+    extra `[vision]`; una cattura fallita si scrive nella riga di stato e
+    lascia a schermo il frame precedente.
   - `[ ]` **1.5 read-back dal vivo** — per ogni rettangolo disegnato, cosa ci
     legge l'OCR. È la parte che ripaga: i due bug di calibrazione passati non
     erano rettangoli storti a vedersi, erano rettangoli che leggevano altro.

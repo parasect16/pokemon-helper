@@ -29,6 +29,14 @@ from pokemon_helper.vision.roi import TEAM_SIZE, GameRois, Roi, TeamMenuRois
 SCREEN_BATTLE = "battle"
 SCREEN_PARTY_MENU = "party_menu"
 
+# Come si chiamano le due schermate quando se ne parla all'utente. Doppione
+# voluto di `ScreenMode.label`, per la stessa ragione delle costanti qui
+# sopra: un nome da mostrare non vale l'import di numpy.
+SCREEN_LABELS = {
+    SCREEN_BATTLE: "schermata di combattimento",
+    SCREEN_PARTY_MENU: "elenco Pokemon",
+}
+
 # Etichette dei gruppi di slot del menu squadra: prefisso in italiano, uno
 # per campo di `TeamMenuRois`.
 _SLOT_GROUP_LABELS = {

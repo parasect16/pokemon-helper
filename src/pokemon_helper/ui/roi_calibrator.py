@@ -27,6 +27,9 @@ ha tracciato. La logica di quali rettangoli esistano sta in
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 from PIL import Image
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap
@@ -56,6 +59,7 @@ from pokemon_helper.vision.roi import (
 )
 from pokemon_helper.vision.roi_targets import (
     SCREEN_BATTLE,
+    SCREEN_LABELS,
     SCREEN_PARTY_MENU,
     TARGETS,
     TARGETS_BY_KEY,
@@ -87,6 +91,24 @@ _SCREEN_HEADERS = {
     SCREEN_BATTLE: "— Schermata di combattimento —",
     SCREEN_PARTY_MENU: "— Elenco Pokemon —",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class CalibrationFrame:
+    """Un frame su cui calibrare, con quel che serve per interpretarlo.
+
+    `screen` è la schermata riconosciuta — i valori di `roi_targets` — e serve
+    a dire all'utente che sta disegnando una ROI di combattimento mentre a
+    video c'è l'elenco Pokemon. La classificazione la fa chi cattura, non il
+    dialogo: `vision.screen_mode` tira dentro numpy, e il calibratore deve
+    restare importabile anche dove gli extra `[vision]` non ci sono.
+    """
+
+    image: Image.Image
+    layout: GameLayout
+    screen: str = ""
+    # Motivo della classificazione, quando c'è: finisce nel tooltip.
+    note: str = ""
 
 
 def fit_zoom_percent(frame_width: int) -> int:
@@ -135,11 +157,12 @@ class _RoiCanvas(QWidget):
 
     # ------------------------------------------------------------- contenuto
 
-    def set_frame(self, image: Image.Image, layout: GameLayout) -> None:
+    def set_frame(self, frame: CalibrationFrame) -> None:
         """Sostituisce il frame di riferimento e ricalcola l'area di gioco."""
+        image = frame.image
         self._pixmap = QPixmap.fromImage(pil_to_qimage(image))
-        self._layout = layout
-        self._game_area = compute_game_area(image.width, image.height, layout)
+        self._layout = frame.layout
+        self._game_area = compute_game_area(image.width, image.height, frame.layout)
         self._resize_to_zoom()
 
     def set_rois(self, rois: GameRois) -> None:
@@ -317,33 +340,43 @@ class RoiCalibratorDialog(QDialog):
     """Dialogo di calibrazione: elenco dei bersagli a sinistra, frame a destra.
 
     Il risultato si legge con `rois()` dopo un `exec()` accettato. Il dialogo
-    non salva nulla da solo e non cattura nulla da solo: riceve un frame e
-    restituisce delle ROI, così resta usabile anche da un test senza
-    emulatore.
+    non salva nulla: riceve un frame, restituisce delle ROI.
+
+    La cattura arriva da fuori come `frame_source`, una funzione che ritorna
+    un `CalibrationFrame`. Così il dialogo resta costruibile in un test senza
+    emulatore e senza gli extra `[vision]`; senza sorgente il pulsante
+    "Cattura" è spento e si lavora sul frame iniziale.
     """
 
     def __init__(
         self,
         *,
-        frame: Image.Image,
-        layout: GameLayout,
+        frame: CalibrationFrame,
         rois: GameRois,
         game_key: str,
         defaults: GameRois | None = None,
+        frame_source: Callable[[], CalibrationFrame] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Calibrazione ROI — {game_key}")
-        self._layout_info = layout
+        self._layout_info = frame.layout
+        self._screen = frame.screen
+        self._screen_note = frame.note
         self._rois = rois
         self._defaults = defaults if defaults is not None else rois
+        self._frame_source = frame_source
 
         self._targets_list = QListWidget()
         self._hint = QLabel()
         self._hint.setWordWrap(True)
         self._coords = QLabel()
+        self._screen_banner = QLabel()
+        self._screen_banner.setWordWrap(True)
         self._canvas = _RoiCanvas()
         self._zoom = QSlider(Qt.Orientation.Horizontal)
+        self._capture_button = QPushButton("Cattura la schermata a video")
+        self._capture_button.setEnabled(frame_source is not None)
         self._reset_button = QPushButton("Ripristina questo rettangolo")
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -351,9 +384,9 @@ class RoiCalibratorDialog(QDialog):
 
         self._build_ui()
         self._populate_targets()
-        self._canvas.set_frame(frame, layout)
+        self._canvas.set_frame(frame)
         self._canvas.set_rois(rois)
-        self._zoom.setValue(fit_zoom_percent(frame.width))
+        self._zoom.setValue(fit_zoom_percent(frame.image.width))
         self._select_first_target()
         self.resize(1200, 800)
 
@@ -363,11 +396,18 @@ class RoiCalibratorDialog(QDialog):
         """Le ROI correnti, calibrate o no."""
         return self._rois
 
-    def set_frame(self, frame: Image.Image, layout: GameLayout) -> None:
-        """Sostituisce il frame mostrato, per ricatturare senza riaprire."""
-        self._layout_info = layout
-        self._canvas.set_frame(frame, layout)
+    def set_frame(self, frame: CalibrationFrame) -> None:
+        """Sostituisce il frame mostrato, per ricatturare senza riaprire.
+
+        I rettangoli già disegnati restano: si ricattura per passare da una
+        schermata all'altra, non per ricominciare.
+        """
+        self._layout_info = frame.layout
+        self._screen = frame.screen
+        self._screen_note = frame.note
+        self._canvas.set_frame(frame)
         self._canvas.set_rois(self._rois)
+        self._refresh_screen_banner()
 
     def selected_key(self) -> str | None:
         item = self._targets_list.currentItem()
@@ -388,6 +428,7 @@ class RoiCalibratorDialog(QDialog):
         scroll.setWidgetResizable(False)
 
         self._canvas.roiDrawn.connect(self._on_roi_drawn)
+        self._capture_button.clicked.connect(self._on_capture)
         self._reset_button.clicked.connect(self._on_reset_current)
         self._buttons.accepted.connect(self.accept)
         self._buttons.rejected.connect(self.reject)
@@ -399,11 +440,16 @@ class RoiCalibratorDialog(QDialog):
         left.addWidget(self._coords)
         left.addWidget(self._reset_button)
 
+        right_header = QHBoxLayout()
+        right_header.addWidget(self._capture_button)
+        right_header.addWidget(self._screen_banner, stretch=1)
+
         zoom_row = QHBoxLayout()
         zoom_row.addWidget(QLabel("Zoom"))
         zoom_row.addWidget(self._zoom, stretch=1)
 
         right = QVBoxLayout()
+        right.addLayout(right_header)
         right.addWidget(scroll, stretch=1)
         right.addLayout(zoom_row)
 
@@ -443,6 +489,45 @@ class RoiCalibratorDialog(QDialog):
             return
         self._hint.setText(TARGETS_BY_KEY[key].hint)
         self._refresh_coords(key)
+        self._refresh_screen_banner()
+
+    def _on_capture(self) -> None:
+        """Rilegge la finestra dell'emulatore e mostra il nuovo frame.
+
+        Un fallimento (emulatore chiuso, finestra non catturabile) finisce
+        nella riga di stato e lascia a schermo il frame precedente: perdere
+        l'immagine su cui si sta lavorando sarebbe la reazione peggiore a un
+        errore transitorio.
+        """
+        if self._frame_source is None:
+            return
+        try:
+            frame = self._frame_source()
+        except Exception as exc:  # noqa: BLE001 — va mostrato, non propagato
+            self._screen_banner.setText(f"\u26a0 Cattura fallita: {exc}")
+            self._screen_banner.setToolTip(str(exc))
+            return
+        self.set_frame(frame)
+
+    def _refresh_screen_banner(self) -> None:
+        """Dice cosa c'è a video e se è la schermata giusta per il bersaglio.
+
+        Disegnare una ROI di combattimento mentre a video c'è l'elenco
+        Pokemon produce un rettangolo che sembra a posto e legge il vuoto: è
+        il modo più rapido di rovinare una calibrazione, e questo è l'unico
+        momento in cui si può dire qualcosa.
+        """
+        shown = SCREEN_LABELS.get(self._screen, "schermata non riconosciuta")
+        key = self.selected_key()
+        target = TARGETS_BY_KEY[key] if key is not None else None
+        if target is not None and self._screen and target.screen != self._screen:
+            expected = SCREEN_LABELS.get(target.screen, target.screen)
+            self._screen_banner.setText(
+                f"\u26a0 A video: {shown}. Questo rettangolo si misura su: {expected}."
+            )
+        else:
+            self._screen_banner.setText(f"A video: {shown}.")
+        self._screen_banner.setToolTip(self._screen_note)
 
     def _on_roi_drawn(self, key: str, roi: Roi) -> None:
         self._rois = replace_roi(self._rois, key, roi)
