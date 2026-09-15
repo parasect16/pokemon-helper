@@ -245,7 +245,7 @@ def main() -> None:
             f"aspect={game_area.w / game_area.h:.3f}\n"
         )
     else:
-        layout = GameLayout(aspect_ratio=240 / 160, menu_offset_top=args.menu_offset)
+        layout = GameLayout(native_width=240, native_height=160, menu_offset_top=args.menu_offset)
         game_area = compute_game_area(img.width, img.height, layout)
         print(
             f"game area (computed): "
