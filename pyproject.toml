@@ -16,6 +16,9 @@ dependencies = []
 dev = [
     "pytest>=8.3",
     "pytest-cov>=5.0",
+    # Fixture `qapp`/`qtbot` per i test di `ui/`: creano una sola QApplication
+    # per sessione e ripuliscono i widget fra un test e l'altro.
+    "pytest-qt>=4.4",
     "ruff>=0.6",
     "pre-commit>=4.0",
 ]

@@ -26,6 +26,17 @@ src/pokemon_helper/
 
 Ogni sottopacchetto ha proprio `__init__.py` e test in `tests/<subpackage>/`.
 
+## Branch e push
+
+Il remote GitHub è **pubblico**. Pubblicare è una decisione dell'utente, non
+un effetto collaterale del lavoro.
+
+- Ogni fix, feature o modifica va su un **branch separato**: `git checkout -b
+  <tipo>/<descrizione>` prima del primo commit.
+- **Mai** committare direttamente su `main`.
+- **Mai** fare `push` (né su `main` né sul branch) senza richiesta esplicita.
+  Niente merge, niente PR se non richiesti.
+
 ## Commit
 
 **Conventional Commits** con scope tra parentesi. Formato:

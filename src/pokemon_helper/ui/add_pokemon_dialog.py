@@ -84,7 +84,11 @@ class AddPokemonDialog(QDialog):
         self._strict_pokemon = [p for p in self._all_pokemon if p.generation_introduced in compat]
 
         self._build_ui(initial)
-        self._populate_list(filter_text="")
+        # Si parte dal testo che `_build_ui` ha eventualmente pre-inserito per
+        # uno slot già assegnato: popolare con filtro vuoto mostrerebbe la
+        # lista intera sotto una casella di ricerca piena, e col primo
+        # risultato preselezionato un OK immediato cambierebbe la specie.
+        self._populate_list(self._search.text())
 
     # --------------------------------------------------------------- build
 

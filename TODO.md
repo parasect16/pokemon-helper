@@ -60,14 +60,13 @@ Convenzioni:
 
 ## Da fare — polish / feature
 
-- `[ ]` **ROI `player_sprite` e `player_hp_bar` ancora storte**. La
-  riproiezione di `1f85b1e` ha corretto la componente chrome, ma la
-  calibrazione originale di queste due era sbagliata di suo: nell'overlay
-  `player_sprite` taglia la testa dello sprite e include il box messaggi,
-  `player_hp_bar` cade sotto la barra verde sopra i numeri PS. Nessun codice
-  usa `player_hp_bar` oggi (solo `roi_debug.py` la disegna), quindi è
-  innocua; `player_sprite` degrada solo il canale pHash, che in battaglia è
-  già inutilizzabile (voce sotto).
+- `[x]` **ROI `player_sprite` e `player_hp_bar`** ricalibrate misurando i
+  pixel su cattura 1119x734, non a occhio. `player_hp_bar` stava sui numeri
+  PS (y nativa 95-99) invece che sulla barra (90-95). `player_sprite`
+  arrivava a y nativa 124, dentro il box messaggi che comincia a 112, e
+  partiva 30 px a sinistra dello sprite: ora è lo slot 64x64 in cui la Gen 3
+  disegna gli sprite posteriori (x 40-104, y 48-112), la stessa inquadratura
+  delle reference indicizzate.
 
 - `[!]` **pHash sprite inutilizzabile in battaglia**. La cattura ha campo e
   cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la
@@ -82,9 +81,12 @@ Convenzioni:
   Sblocca giochi non supportati senza toccare codice.
 - `[ ]` **Supporto Pokemon Cristallo** (Gen 2 mGBA). Nuove ROI, layout GB/GBC
   (160×144, aspect 10:9), aggiungere `LAYOUT_MGBA_GB` in `_GAME_BY_GENERATION`.
-- `[ ]` **Test UI** con `pytest-qt`. Coverage ora 0 su `ui/`. Focus
-  `TeamPanel.replace_team`, `OpponentPanel.set_active_player`,
-  `state.StateStore` (già coperto).
+- `[x]` **Test UI** con `pytest-qt`. Coverage `ui/` da 0 a 65%: pannelli,
+  finestra, dialoghi, poller F4 e worker persistente. I widget si costruiscono
+  davvero su piattaforma `offscreen`. Restano scoperti `run()` (assembla l'app
+  intera) e `hotkey.py` (pynput). Un bug trovato scrivendoli: aprendo `…` su
+  uno slot già assegnato la ricerca era pre-compilata ma la lista no, e un OK
+  immediato riassegnava lo slot al primo Pokemon dell'elenco.
 - `[ ]` **Screen mode detection formale**: euristica attuale (≥3 slot
   OCR-leggibili) può fallire. Meglio: OCR di elemento unico del menu (es.
   pulsante "ESCI" bottom-right) come sentinella.
@@ -92,10 +94,18 @@ Convenzioni:
 - `[x]` **Nickname map utente** (commit 13dd606): dialog 🏷 per associare
   nickname → species, salvato in `state.json`. Team recognize usa mappa
   prima del fuzzy match.
-- `[ ]` **Auto-detect chrome mGBA**: `LAYOUT_MGBA_GBA.menu_offset_top=52`
-  hardcoded per Win10 Pro DPI 100%. Su Win11 o DPI diverse cambia. Fix:
-  scan prima riga teal (bg gioco) sul frame catturato per calcolare offset
-  dinamicamente. ~1h.
+- `[x]` **Auto-detect chrome mGBA** (`vision/chrome.py`). Il chrome si misura
+  sul frame: titolo e menu bar sono righe grigie e chiare, le schermate di
+  gioco sono sature. Il nero è escluso di proposito — è anche il colore delle
+  bande di letterbox, e contarle sposterebbe l'area di gioco. Fallback al
+  valore dichiarato nel layout quando la misura non convince (tema scuro,
+  schermo bianco in transizione). Usato da `on_recognize`, `on_recognize_team`
+  e `probe`.
+  **Verificato sul vivo**: 52 px, identico al valore misurato a mano. La
+  prima cattura però dava `None`, e ha scoperto due assunzioni sbagliate: il
+  frame comincia col bordo della finestra (una riga scura, non la barra del
+  titolo) e la prima riga del campo FRLG è `(231, 255, 231)`, distanza fra
+  canali esattamente 24, che passava per grigia.
 
 ## Da fare — infra
 

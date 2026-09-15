@@ -1,6 +1,6 @@
 # HANDOFF — pokemon-helper
 
-Passaggio per nuova sessione o nuovo collaboratore. Stato al **2026-09-06**.
+Passaggio per nuova sessione o nuovo collaboratore. Stato al **2026-09-12**.
 
 Vedi [`PLAN.md`](PLAN.md) per roadmap, [`CLAUDE.md`](CLAUDE.md) per convenzioni.
 
@@ -45,7 +45,7 @@ Requisiti: Python 3.14 (pin in `.python-version`), Windows 10/11, mGBA per ricon
 src/pokemon_helper/
   engine/           # F1: type chart, EffectivenessEngine, matchup helpers.
   data/             # F0.1: SQLite schema, models, PokemonRepository.
-  vision/           # F0.2 + F3: capture, ROI, OCR, sprite hash, recognizer.
+  vision/           # F0.2 + F3: capture, chrome, ROI, OCR, sprite hash, recognizer.
   ui/               # F2: overlay Qt, TeamPanel, OpponentPanel, hotkey, state.
   __main__.py       # CLI entry-point → ui.app.run
 
@@ -67,7 +67,7 @@ scripts/
   extract_roi_from_annotated.py  # bbox per colore da PNG annotato → coord Roi
 
 tests/
-  engine/ data/ ui/ vision/  # pytest, 280 test. engine+data al 100%, ui/ a 0.
+  engine/ data/ ui/ vision/  # pytest, 380 test. engine+data al 100%, ui/ al 65%.
 
 data/                        # gitignored (eccetto la struttura)
   vendor/pokedex/            # shallow clone veekun (CSV Pokedex)
@@ -78,7 +78,7 @@ data/                        # gitignored (eccetto la struttura)
 ## 4. Comandi utili
 
 ```powershell
-pytest -q                            # 280 test, tutti verdi
+pytest -q                            # 380 test, tutti verdi
 pytest --cov                         # coverage con floor 90% su engine+data (oggi 100%)
 ruff check .                         # lint
 ruff format .                        # format
@@ -104,8 +104,8 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 
 - **Livello non mostrato con alterazione di stato**: se il Pokemon è avvelenato/paralizzato/ecc. il gioco disegna il badge di stato al posto di `L.XX`. `read_level` ritorna `None` e lo slot conserva il livello precedente, editabile via `…`. (La lettura del livello in sé è risolta: vedi `vision/level_reader.py`.)
 - **Match icona menu Pokemon**: pHash/dhash rumorosi anche col color-key HSV. Oggi conta poco: l'OCR nome rec-only riconosce tutti gli slot, quindi il fallback icona non viene quasi mai raggiunto.
-- **Chrome mGBA hardcoded 52 px**: title bar + menu bar misurati sulla macchina utente (Win10 Pro DPI 100%). Su Win11 o DPI diverse serve auto-detect (scan prima riga teal del frame).
-- **ROI hardcoded**: solo FRLG a scala mGBA. Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi. Parzialmente coperto da `extract_roi_from_annotated.py` (offline).
+- **Chrome mGBA**: non è più un numero fisso. `vision/chrome.py` misura la fascia sul frame catturato (titolo e menu bar sono righe grigie e chiare, le schermate di gioco sono sature) e i 52 px del layout restano il fallback. Con un tema scuro la misura non passa e si ripiega sul fallback: il nero è escluso di proposito, perché è anche il colore delle bande di letterbox.
+- **ROI hardcoded**: solo FRLG a scala mGBA. Quelle di combattimento sono state verificate su cattura live (le due del lato giocatore ricalibrate misurando i pixel). Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi. Parzialmente coperto da `extract_roi_from_annotated.py` (offline).
 - **pHash sprite in combattimento**: inservibile. La cattura ha campo e cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la specie corretta non entra nei primi tre a nessun offset di ROI (Weezing a distanza 20-24 mentre specie sbagliate stanno a 14-16). Il verdetto regge interamente sul nome.
 - **Abilità ambigue**: molte specie ne ammettono più d'una e dallo sprite non si distinguono. Il filtro per generazione ne risolve circa metà in Gen 3, meno in Gen 5. Per il resto il pannello non applica nulla e segnala il dubbio, e l'abilità si fissa a mano dal menu sulla card.
 - **Abilità storiche**: veekun pubblica solo l'assegnazione corrente. `ABILITY_HISTORY_OVERRIDES` copre Gengar (che ha perso Levitazione in Gen 7); altri casi eventuali vanno aggiunti lì a mano.
@@ -117,28 +117,20 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 Ordinati per valore/costo. Tutte le fasi del piano (F0-F4) sono chiuse: da qui
 in poi sono estensioni, non completamento.
 
-1. **Test UI con `pytest-qt`**: `ui/` è a coverage 0 ed è la parte cresciuta di
-   più (`_BattlePoller`, wiring del watcher, `fit_height`, selettore abilità).
-   La logica pura è coperta al 100%, il collante Qt per niente: è lì che
-   vivono ormai i bug plausibili. ~2-3h.
-2. **Calibratore ROI visuale**: dialog con canvas su screenshot, si disegnano
+1. **Calibratore ROI visuale**: dialog con canvas su screenshot, si disegnano
    i rettangoli per (nome opp, sprite opp, HUD player, ecc.). È il
    prerequisito pratico di qualunque nuovo gioco, e toglie di mezzo la
    ricalibrazione a mano che in questo repo è già costata due bug. ~4-6h.
-3. **Secondo gioco**: Cristallo (Gen 2 mGBA) o HeartGold (Gen 4
+2. **Secondo gioco**: Cristallo (Gen 2 mGBA) o HeartGold (Gen 4
    melonDS/DeSmuME). Serve layout GB/GBC (160×144, aspect 10:9) o doppio
    schermo DS, ROI dedicate, `preferred_game`. Nota: in Gen 1-2 non esistono
    abilità, quindi quel layer semplicemente non si attiva.
-4. **Packaging Windows**: PyInstaller o installer, per non dipendere dal venv.
-5. **Segmentare lo sprite dallo sfondo**: il canale pHash in battaglia è
+3. **Packaging Windows**: PyInstaller o installer, per non dipendere dal venv.
+4. **Segmentare lo sprite dallo sfondo**: il canale pHash in battaglia è
    inservibile perché la cattura ha campo e cielo mentre le reference stanno
    su bianco. I fondali di battaglia sono a bande piatte, quindi un flood-fill
    dai bordi è plausibile. Recupererebbe il secondo segnale, oggi portato
    interamente dal nome.
-6. **ROI `player_sprite` / `player_hp_bar`**: ancora mal centrate, per un
-   errore di calibrazione loro indipendente dal chrome. Impatto basso finché
-   il pHash resta inservibile (vedi sopra). ~1h con una cattura di
-   riferimento.
 
 ## 8. Convenzioni rapide
 
