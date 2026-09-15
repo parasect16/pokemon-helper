@@ -247,6 +247,11 @@ _GAME_BY_GENERATION: dict[int, str] = {
 # sbagliata.
 MIN_RECOGNITION_CONFIDENCE = 0.6
 
+# Quanto la GUI aspetta il frame che ha chiesto al worker per il calibratore.
+# Una cattura costa ~50 ms; il margine copre il caso in cui il worker stia
+# finendo un riconoscimento appena partito.
+CALIBRATION_CAPTURE_TIMEOUT_S = 10.0
+
 
 def default_db_path() -> Path:
     """Path atteso del database SQLite: `<cwd>/data/pokemon.sqlite`."""
@@ -362,7 +367,8 @@ def _init_recognize_hotkey(
         from pokemon_helper.vision.chrome import resolve_layout
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
-        from pokemon_helper.vision.roi import compute_game_area, roi_to_pixels
+        from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
+        from pokemon_helper.vision.roi_probe import make_reader
         from pokemon_helper.vision.roi_store import RoiStore, resolve_rois
         from pokemon_helper.vision.screen_mode import ScreenMode, classify_screen
     except ImportError as exc:
@@ -556,6 +562,94 @@ def _init_recognize_hotkey(
 
     team_panel.reloadOpponentRequested.connect(lambda: worker.submit(on_recognize))
     team_panel.reloadTeamRequested.connect(lambda: worker.submit(on_recognize_team))
+
+    def capture_calibration_frame(game_key: str):
+        """Un frame classificato per il calibratore, catturato dal worker.
+
+        La cattura deve girare sul thread del worker (apartment COM), ma il
+        calibratore vive sul thread GUI: il job viene accodato e il risultato
+        torna indietro da una coda. L'attesa blocca la GUI per la durata di
+        una cattura, ~50 ms, e succede solo quando l'utente preme un pulsante.
+        """
+        from pokemon_helper.ui.roi_calibrator import CalibrationFrame
+
+        layout, rois = rois_for(game_key)
+        outcome: queue.Queue = queue.Queue(maxsize=1)
+
+        def job() -> None:
+            try:
+                captured = capture.capture_frame(timeout_seconds=3.0)
+                measured = resolve_layout(captured.image, layout)
+                verdict = classify_screen(captured.image, measured, rois, ocr=ocr)
+                outcome.put(
+                    (
+                        CalibrationFrame(
+                            image=captured.image,
+                            layout=measured,
+                            screen=verdict.mode.value,
+                            note=verdict.reason,
+                        ),
+                        None,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - riportato a chi ha chiesto il frame
+                outcome.put((None, exc))
+
+        worker.submit(job)
+        try:
+            frame, error = outcome.get(timeout=CALIBRATION_CAPTURE_TIMEOUT_S)
+        except queue.Empty:
+            raise TimeoutError("il worker di cattura non ha risposto") from None
+        if error is not None:
+            raise error
+        return frame
+
+    def on_calibrate() -> None:
+        """Apre il calibratore sulle ROI del gioco della generazione corrente.
+
+        L'auto-detect viene sospeso per la durata: il dialogo e' modale ma il
+        timer continuerebbe a girare, e due catture in coda mentre si calibra
+        servono solo a far aspettare chi preme "Cattura".
+        """
+        from pokemon_helper.ui.roi_calibrator import RoiCalibratorDialog
+
+        game_key = _GAME_BY_GENERATION.get(state.generation)
+        if game_key is None:
+            team_panel.flash_opponent_reload_warning(
+                f"nessun gioco supportato per Gen {state.generation}"
+            )
+            return
+        try:
+            frame = capture_calibration_frame(game_key)
+        except Exception as exc:  # noqa: BLE001 - senza un frame non si calibra
+            team_panel.flash_opponent_reload_warning(f"cattura fallita: {exc}")
+            return
+
+        was_polling = state.auto_detect
+        if was_polling:
+            poller.set_enabled(False)
+        try:
+            _, current = rois_for(game_key)
+            dialog = RoiCalibratorDialog(
+                frame=frame,
+                rois=current,
+                game_key=game_key,
+                defaults=GAME_ROIS[game_key][1],
+                frame_source=lambda: capture_calibration_frame(game_key),
+                reader=make_reader(ocr),
+                parent=team_panel.window(),
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            roi_store.save(game_key, dialog.rois())
+            # La cache tiene il valore vecchio: senza questo, la calibrazione
+            # appena salvata non varrebbe fino al riavvio dell'app.
+            resolved_rois.pop(game_key, None)
+        finally:
+            if was_polling:
+                poller.set_enabled(True)
+
+    team_panel.calibrateRoisRequested.connect(on_calibrate)
 
     def probe() -> tuple[bool | None, tuple[str, ...] | None]:
         """Un giro di osservazione: siamo in battaglia, e chi c'è in campo.

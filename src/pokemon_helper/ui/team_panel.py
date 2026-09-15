@@ -52,6 +52,7 @@ class TeamPanel(QWidget):
     reloadTeamRequested = Signal()  # utente ha cliccato "Ricarica squadra"
     reloadOpponentRequested = Signal()  # utente ha cliccato "Ricarica avversario"
     nicknamesRequested = Signal()  # utente ha cliccato "Nickname"
+    calibrateRoisRequested = Signal()  # utente ha cliccato "Calibra ROI"
     autoDetectToggled = Signal(bool)  # utente ha cambiato l'interruttore auto-detect
     contentResized = Signal()  # il contenuto ha cambiato ingombro verticale
     abilityPinned = Signal(int, object)  # (pokemon_id, identifier | None)
@@ -187,6 +188,12 @@ class TeamPanel(QWidget):
         self._nicknames_btn.setFixedWidth(30)
         self._nicknames_btn.clicked.connect(lambda: self.nicknamesRequested.emit())
         row.addWidget(self._nicknames_btn)
+
+        self._calibrate_btn = QPushButton("▣", self)
+        self._calibrate_btn.setToolTip("Calibra le aree di lettura sulla finestra dell'emulatore")
+        self._calibrate_btn.setFixedWidth(30)
+        self._calibrate_btn.clicked.connect(lambda: self.calibrateRoisRequested.emit())
+        row.addWidget(self._calibrate_btn)
 
         # Interruttore F4. Spento di default: mentre è attivo l'app cattura la
         # finestra dell'emulatore due volte al secondo, quindi deve essere una

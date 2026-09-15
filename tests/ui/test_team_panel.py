@@ -154,6 +154,8 @@ def test_reload_buttons_emit_their_requests(panel, qtbot) -> None:
         panel._reload_opp_btn.click()
     with qtbot.waitSignal(panel.nicknamesRequested):
         panel._nicknames_btn.click()
+    with qtbot.waitSignal(panel.calibrateRoisRequested):
+        panel._calibrate_btn.click()
 
 
 def test_the_auto_detect_switch_emits_only_when_the_user_moves_it(panel, qtbot) -> None:

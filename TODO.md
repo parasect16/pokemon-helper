@@ -98,7 +98,7 @@ Convenzioni:
   nuova sui numeri PS dell'HUD (y nativa 95-99 in FRLG, misurata quando
   `player_hp_bar` ci cadeva sopra per errore).
 
-- `[~]` **Calibratore ROI visuale** (~7h stimate, 16 rettangoli da disegnare).
+- `[x]` **Calibratore ROI visuale** (16 rettangoli da disegnare).
   Dialog con canvas su screenshot, utente disegna i rettangoli. Sblocca giochi
   non supportati senza toccare codice.
   - `[x]` **1.1 persistenza** — `vision/roi_store.py`: JSON per gioco in
@@ -141,7 +141,14 @@ ois\<gioco>.json`, `RoiStore` load/save/clear,
     confronta le ROI ricostruite: se un giorno smettesse di essere Python
     valido, si saprebbe. Il **salvataggio** su `RoiStore` resta al chiamante
     (1.7), come già fa `NicknameDialog`: il dialogo non conosce il disco.
-  - `[ ]` **1.7 aggancio UI + docs**.
+  - `[x]` **1.7 aggancio UI** — pulsante `▣` in `TeamPanel`, dialogo aperto
+    sul gioco della generazione corrente. La cattura per il calibratore passa
+    dal worker (apartment COM) e il risultato torna alla GUI da una coda: si
+    blocca il thread GUI per ~50 ms, e solo su pressione di un pulsante.
+    L'auto-detect viene sospeso mentre il dialogo è aperto, altrimenti i suoi
+    poll si accodano davanti alla "Cattura". All'OK si salva su `RoiStore` e
+    si invalida la cache delle ROI risolte, o la calibrazione appena fatta
+    non varrebbe fino al riavvio.
 - `[ ]` **Supporto Pokemon Cristallo** (Gen 2 mGBA). Nuove ROI, layout GB/GBC
   (160×144, aspect 10:9), aggiungere `LAYOUT_MGBA_GB` in `_GAME_BY_GENERATION`.
 - `[x]` **Test UI** con `pytest-qt`. Coverage `ui/` da 0 a 65%: pannelli,
