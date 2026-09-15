@@ -304,16 +304,13 @@ def _init_recognize_hotkey(
     recognize (overhead ~1 ms). Zero contesa con il thread GUI, zero rischio.
     """
     try:
-        from pokemon_helper.vision.battle_detector import (
-            is_battle_screen,
-            is_party_menu_screen,
-        )
         from pokemon_helper.vision.battle_watcher import BattleEvent, BattleWatcher
         from pokemon_helper.vision.capture import CaptureError, WindowCapture
         from pokemon_helper.vision.chrome import resolve_layout
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
         from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
+        from pokemon_helper.vision.screen_mode import ScreenMode, classify_screen
     except ImportError as exc:
         print(f"[vision] deps non installate, riconoscimento disabilitato: {exc}")
         return None
@@ -368,10 +365,13 @@ def _init_recognize_hotkey(
             # Guard: se la barra HP avversario non ha pixel HP-colored, non
             # siamo in battaglia — non aggiornare l'avversario per evitare
             # falsi positivi (analog a `_team_snapshot_looks_like_menu`).
-            in_battle, reason = is_battle_screen(frame.image, layout, rois)
-            if not in_battle:
+            # Niente `ocr=`: qui interessa solo distinguere BATTLE da tutto
+            # il resto, e la sentinella dell'elenco Pokemon non servirebbe.
+            verdict = classify_screen(frame.image, layout, rois)
+            if verdict.mode is not ScreenMode.BATTLE:
+                detail = verdict.reason or f"({verdict.mode.label})"
                 bridge.opponent_failed.emit(
-                    f"schermata combattimento non rilevata {reason} — avversario non aggiornato"
+                    f"schermata combattimento non rilevata {detail} — avversario non aggiornato"
                 )
                 return
 
@@ -425,6 +425,19 @@ def _init_recognize_hotkey(
             layout, rois = GAME_ROIS[game_key]
             frame = capture.capture_frame(timeout_seconds=3.0)
             layout = resolve_layout(frame.image, layout)
+
+            # Guard a monte: leggere i 6 slot costa 12 chiamate OCR, quindi
+            # conviene sapere prima se siamo davvero sull'elenco Pokemon.
+            # Qui passiamo `ocr=`: il colore teal da solo direbbe di sì anche
+            # su un'altra schermata a fondo teal, la sentinella "ESCI" no.
+            verdict = classify_screen(frame.image, layout, rois, ocr=ocr)
+            if verdict.mode is not ScreenMode.PARTY_MENU:
+                detail = verdict.reason or f"({verdict.mode.label})"
+                bridge.team_failed.emit(
+                    f"schermata Pokemon non rilevata {detail} — squadra non aggiornata"
+                )
+                return
+
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
                 results = recognizer.recognize_team(
@@ -435,10 +448,14 @@ def _init_recognize_hotkey(
                     nickname_map=state.nicknames,
                 )
 
+            # Seconda linea, dopo il guard sulla schermata: quello guarda un
+            # rettangolo, questa guarda cosa è stato davvero letto. Falliscono
+            # per cause diverse — elenco aperto ma ROI disallineate, per dirne
+            # una — quindi restano entrambe.
             looks_menu, reason = _team_snapshot_looks_like_menu(results)
             if not looks_menu:
                 bridge.team_failed.emit(
-                    f"schermata Pokemon non rilevata {reason} — squadra non aggiornata"
+                    f"lettura degli slot non coerente {reason} — squadra non aggiornata"
                 )
                 return
 
@@ -492,12 +509,15 @@ def _init_recognize_hotkey(
         except CaptureError, TimeoutError:
             return False, None
         layout = resolve_layout(frame, layout)
+        # Senza `ocr=`: la sentinella costerebbe un'OCR ogni 750 ms, e qui
+        # basta il colore. Un falso "elenco Pokemon" costa un giro di "non lo
+        # so", che è esattamente il costo di sbagliarsi al ribasso.
+        verdict = classify_screen(frame, layout, rois)
         # L'elenco Pokemon si apre *durante* la lotta per cambiare Pokemon:
         # non dice nulla sul combattimento, quindi non va letto come "finito".
-        if is_party_menu_screen(frame, layout):
+        if verdict.mode is ScreenMode.PARTY_MENU:
             return None, None
-        in_battle, _ = is_battle_screen(frame, layout, rois)
-        if not in_battle:
+        if verdict.mode is not ScreenMode.BATTLE:
             return False, None
         game_area = compute_game_area(frame.width, frame.height, layout)
         signature = tuple(

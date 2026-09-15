@@ -125,6 +125,9 @@ class GameRois:
     player_name: Roi
     player_sprite: Roi
     player_hp_bar: Roi
+    # Pulsante in basso a destra dell'elenco Pokemon, usato da
+    # `vision.screen_mode` come sentinella testuale della schermata.
+    party_menu_sentinel: Roi
     team_menu: TeamMenuRois
 
 
@@ -173,6 +176,13 @@ ROIS_FIRERED = GameRois(
     # cattura seguendo il rosso del riempimento e il grigio della traccia.
     player_hp_bar=Roi(x=0.718, y=0.563, w=0.208, h=0.032),
     # --- Menu Pokemon ---
+    # Pulsante "ESCI", la pillola viola in basso a destra dell'elenco. Box
+    # misurato per colore (il viola del pulsante, escluso il pokeball a
+    # sinistra) su due catture live di dimensioni diverse — 1119x734 e
+    # 1119x767 — che danno lo stesso rettangolo normalizzato a meno di
+    # 0.001. Un pelo più largo dei pixel misurati per non tagliare la "I"
+    # finale quando la finestra ha un'altra scala.
+    party_menu_sentinel=Roi(x=0.838, y=0.857, w=0.148, h=0.082),
     # Layout Rosso Fuoco: slot 0 grande a sinistra (Pokemon "attivo"), slot 1-5
     # righe compatte a destra. `slot_areas` è tight sul nome, `slot_levels`
     # sul solo "L.XX": i due box non si sovrappongono.
