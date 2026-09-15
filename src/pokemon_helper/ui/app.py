@@ -71,10 +71,23 @@ class _RecognizeWorker:
       inizializzato evita stalli imprevedibili nei daemon thread "freschi".
     - Serializzare le richieste (hotkey + pulsante) evita concorrenze sulla
       stessa capture session e sull'inference ONNX di RapidOCR.
+
+    In chiusura il worker non si limita a mettere in coda il sentinella di
+    uscita: la coda viene svuotata (i job accodati e mai partiti non devono
+    più partire), `cancelled` passa a vero perché quello *in corso* possa
+    uscire al primo controllo utile, e `stop` aspetta il thread per un tempo
+    limitato invece di dare per scontato che finisca.
     """
+
+    # Quanto aspettare il job in corso prima di lasciarlo andare. Il worker è
+    # un daemon thread: se sfora, il processo esce comunque. Il valore copre
+    # un riconoscimento intero (cattura ~9 ms + 12 OCR sui sei slot, ~200 ms
+    # in tutto) con un ordine di grandezza di margine.
+    STOP_TIMEOUT_SECONDS = 2.0
 
     def __init__(self) -> None:
         self._queue: queue.Queue[Callable[[], None] | None] = queue.Queue()
+        self._stopping = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
             name="recognize-worker",
@@ -82,18 +95,55 @@ class _RecognizeWorker:
         )
         self._thread.start()
 
+    @property
+    def cancelled(self) -> bool:
+        """Vero da quando `stop()` è stato chiamato.
+
+        I job lunghi lo controllano fra una fase e l'altra per uscire senza
+        toccare risorse che l'app sta smontando.
+        """
+        return self._stopping.is_set()
+
     def submit(self, job: Callable[[], None]) -> None:
-        """Accoda un job. Ritorna subito; il worker lo esegue in FIFO."""
+        """Accoda un job. Ritorna subito; il worker lo esegue in FIFO.
+
+        Dopo `stop()` è un no-op: in chiusura le richieste che arrivano
+        ancora (un tick del poller già partito, una hotkey premuta) non hanno
+        più nessuno a cui consegnare il risultato.
+        """
+        if self._stopping.is_set():
+            return
         self._queue.put(job)
 
-    def stop(self) -> None:
-        """Segnala al worker di uscire; usato all'exit dell'app."""
+    def stop(self, timeout: float | None = None) -> bool:
+        """Ferma il worker e aspetta il job in corso. Ritorna se è uscito.
+
+        Usato all'exit dell'app. Un `False` non è un errore fatale — il thread
+        è daemon — ma va stampato: significa che qualcosa è rimasto appeso
+        oltre il previsto, ed è l'unico punto in cui lo si può notare.
+        """
+        wait_for = self.STOP_TIMEOUT_SECONDS if timeout is None else timeout
+        self._stopping.set()
+        self._drain()
         self._queue.put(None)
+        self._thread.join(wait_for)
+        if self._thread.is_alive():
+            print(f"[recognize-worker] job ancora in corso dopo {wait_for:g}s: abbandonato")
+            return False
+        return True
+
+    def _drain(self) -> None:
+        """Svuota la coda dei job non ancora partiti."""
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                return
 
     def _run(self) -> None:
         while True:
             job = self._queue.get()
-            if job is None:
+            if job is None or self._stopping.is_set():
                 return
             try:
                 job()
@@ -169,6 +219,9 @@ class _BattlePoller:
 
     def _poll(self) -> None:
         """Thread worker: cattura, classifica, emette l'eventuale evento."""
+        if self._worker.cancelled:
+            self._busy.clear()
+            return
         try:
             event = self._watcher.observe(*self._probe())
             if event is not None:
@@ -357,6 +410,10 @@ def _init_recognize_hotkey(
                 bridge.opponent_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
             layout, rois = GAME_ROIS[game_key]
+            # L'app si sta chiudendo: non aprire una cattura che nessuno
+            # aspetta più. Il controllo si ripete dopo ogni fase lunga.
+            if worker.cancelled:
+                return
             frame = capture.capture_frame(timeout_seconds=3.0)
             # Il chrome della finestra dipende da Windows e dal DPI, non dal
             # gioco: si misura sul frame invece di fidarsi del valore nel layout.
@@ -380,6 +437,8 @@ def _init_recognize_hotkey(
             # può essere solo uno dei 6 membri della squadra: restringiamo
             # il match a quell'insieme per aumentare la precisione anche
             # con OCR imperfetta e pHash rumoroso.
+            if worker.cancelled:
+                return
             team_ids = {slot.pokemon_id for slot in state.team if slot is not None}
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
@@ -423,6 +482,8 @@ def _init_recognize_hotkey(
                 bridge.team_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
             layout, rois = GAME_ROIS[game_key]
+            if worker.cancelled:
+                return
             frame = capture.capture_frame(timeout_seconds=3.0)
             layout = resolve_layout(frame.image, layout)
 
@@ -438,6 +499,8 @@ def _init_recognize_hotkey(
                 )
                 return
 
+            if worker.cancelled:
+                return
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
                 results = recognizer.recognize_team(
@@ -551,7 +614,13 @@ def _init_recognize_hotkey(
 
     # `capture` tiene aperta una sessione di Windows Graphics Capture: va
     # chiusa all'uscita, o il bordo attorno alla finestra resta disegnato.
-    return _HotkeyGroup([hotkey, team_hotkey, poller, worker, capture])
+    #
+    # L'ordine conta. Prima i produttori di lavoro (hotkey e poller), poi la
+    # cattura, che chiudendosi sblocca subito un `capture_frame` in attesa
+    # invece di lasciarlo scadere, e solo alla fine il worker, che aspetta il
+    # job in corso. Chiudere la cattura non la fa rinascere: dopo `close()`
+    # una richiesta alza `CaptureError` invece di riaprire la sessione.
+    return _HotkeyGroup([hotkey, team_hotkey, poller, capture, worker])
 
 
 class _HotkeyGroup:
