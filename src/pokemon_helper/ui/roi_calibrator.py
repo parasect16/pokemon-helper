@@ -36,7 +36,16 @@ from dataclasses import dataclass
 
 from PIL import Image
 from PySide6.QtCore import QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QImage,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -61,6 +70,7 @@ from pokemon_helper.vision.roi import (
     roi_to_pixels,
     snap_roi_to_native,
 )
+from pokemon_helper.vision.roi_store import format_rois_snippet
 from pokemon_helper.vision.roi_targets import (
     SCREEN_BATTLE,
     SCREEN_LABELS,
@@ -377,6 +387,7 @@ class RoiCalibratorDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Calibrazione ROI — {game_key}")
+        self._game_key = game_key
         self._layout_info = frame.layout
         self._screen = frame.screen
         self._screen_note = frame.note
@@ -402,6 +413,9 @@ class RoiCalibratorDialog(QDialog):
         self._capture_button = QPushButton("Cattura la schermata a video")
         self._capture_button.setEnabled(frame_source is not None)
         self._reset_button = QPushButton("Ripristina questo rettangolo")
+        self._reset_all_button = QPushButton("Ripristina tutti")
+        self._copy_button = QPushButton("Copia snippet per roi.py")
+        self._status = QLabel()
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -458,6 +472,8 @@ class RoiCalibratorDialog(QDialog):
         self._canvas.roiDrawn.connect(self._on_roi_drawn)
         self._capture_button.clicked.connect(self._on_capture)
         self._reset_button.clicked.connect(self._on_reset_current)
+        self._reset_all_button.clicked.connect(self._on_reset_all)
+        self._copy_button.clicked.connect(self._on_copy_snippet)
         self._buttons.accepted.connect(self.accept)
         self._buttons.rejected.connect(self.reject)
 
@@ -469,6 +485,8 @@ class RoiCalibratorDialog(QDialog):
         left.addWidget(self._preview)
         left.addWidget(self._readback)
         left.addWidget(self._reset_button)
+        left.addWidget(self._reset_all_button)
+        left.addWidget(self._copy_button)
 
         right_header = QHBoxLayout()
         right_header.addWidget(self._capture_button)
@@ -487,9 +505,13 @@ class RoiCalibratorDialog(QDialog):
         body.addLayout(left)
         body.addLayout(right, stretch=1)
 
+        footer = QHBoxLayout()
+        footer.addWidget(self._status, stretch=1)
+        footer.addWidget(self._buttons)
+
         root = QVBoxLayout(self)
         root.addLayout(body, stretch=1)
-        root.addWidget(self._buttons)
+        root.addLayout(footer)
 
     def _populate_targets(self) -> None:
         """Riempie l'elenco, con un'intestazione non selezionabile per schermata."""
@@ -572,6 +594,35 @@ class RoiCalibratorDialog(QDialog):
         if key is None:
             return
         self._on_roi_drawn(key, get_roi(self._defaults, key))
+        self._status.setText(f"{TARGETS_BY_KEY[key].label}: ripristinato.")
+
+    def _on_reset_all(self) -> None:
+        """Butta via tutta la calibrazione e riparte dai valori di fabbrica."""
+        self._rois = self._defaults
+        self._canvas.set_rois(self._rois)
+        key = self.selected_key()
+        if key is not None:
+            self._refresh_coords(key)
+            self._refresh_readback(key)
+        self._status.setText("Tutti i rettangoli sono tornati ai valori di default.")
+
+    def snippet(self) -> str:
+        """Le ROI correnti come literal Python per `roi.py`."""
+        return format_rois_snippet(self._rois, self._game_key)
+
+    def _on_copy_snippet(self) -> None:
+        """Mette lo snippet negli appunti.
+
+        Una calibrazione buona non deve restare su una macchina sola: questo
+        è il passaggio che la fa diventare il default del repo, senza
+        ritrascrivere ventiquattro numeri a mano.
+        """
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:  # pragma: no cover - solo su piattaforme senza appunti
+            self._status.setText("\u26a0 Appunti non disponibili su questa piattaforma.")
+            return
+        clipboard.setText(self.snippet())
+        self._status.setText("Snippet copiato negli appunti, pronto per roi.py.")
 
     def _refresh_coords(self, key: str) -> None:
         self._coords.setText(format_native_rect(get_roi(self._rois, key), self._layout_info))

@@ -499,3 +499,42 @@ def test_capturing_a_new_frame_re_reads_the_selected_rectangle(qtbot, image, fra
     dialog._capture_button.click()
 
     assert dialog._readback.text() != before
+
+
+# ------------------------------------------------------- ripristino ed export
+
+
+def test_reset_all_puts_every_rectangle_back(dialog) -> None:
+    dialog._on_roi_drawn("opponent_name", Roi(x=0.25, y=0.25, w=0.1, h=0.1))
+    dialog._on_roi_drawn("team_menu.slot_levels.2", Roi(x=0.3, y=0.3, w=0.1, h=0.1))
+
+    dialog._reset_all_button.click()
+
+    assert dialog.rois() == ROIS_FIRERED
+    assert "default" in dialog._status.text()
+
+
+def test_reset_all_keeps_the_panel_in_sync(dialog) -> None:
+    """Coordinate e anteprima devono seguire, o mostrerebbero il rettangolo vecchio."""
+    dialog._on_roi_drawn("opponent_name", Roi(x=0.25, y=0.25, w=0.5, h=0.5))
+    wide = dialog._preview.pixmap().size()
+
+    dialog._reset_all_button.click()
+
+    assert dialog._preview.pixmap().size() != wide
+    assert dialog._coords.text() == format_native_rect(ROIS_FIRERED.opponent_name, LAYOUT)
+
+
+def test_the_snippet_reflects_what_was_drawn(dialog) -> None:
+    dialog._on_roi_drawn("opponent_name", Roi(x=0.25, y=0.25, w=0.1, h=0.1))
+
+    snippet = dialog.snippet()
+
+    assert "ROIS_FIRERED = GameRois(" in snippet
+    assert "opponent_name=Roi(x=0.250, y=0.250, w=0.100, h=0.100)" in snippet
+
+
+def test_copying_the_snippet_reports_it(dialog) -> None:
+    dialog._copy_button.click()
+
+    assert "appunti" in dialog._status.text()

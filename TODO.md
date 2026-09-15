@@ -133,9 +133,14 @@ ois\<gioco>.json`, `RoiStore` load/save/clear,
     Verificato sulle catture live: ROI buona → `testo: "HEEZINGL.33" a 1.00`,
     la stessa spostata di 20 px nativi → `nessun testo letto`. È esattamente
     il bug di F3.18, che a occhio non si vedeva.
-  - `[ ]` **1.6 salva / ripristina / esporta** — export di uno snippet Python
-    per `roi.py`, così una calibrazione buona può diventare il default del
-    repo invece di restare su una macchina.
+  - `[x]` **1.6 ripristina / esporta** — "Ripristina tutti" accanto al
+    ripristino del singolo rettangolo, e "Copia snippet per roi.py" che mette
+    negli appunti il literal `GameRois(...)` con tre decimali e i commenti
+    per slot, così una calibrazione buona diventa il default del repo invece
+    di restare su una macchina. Un test esegue lo snippet con `exec` e
+    confronta le ROI ricostruite: se un giorno smettesse di essere Python
+    valido, si saprebbe. Il **salvataggio** su `RoiStore` resta al chiamante
+    (1.7), come già fa `NicknameDialog`: il dialogo non conosce il disco.
   - `[ ]` **1.7 aggancio UI + docs**.
 - `[ ]` **Supporto Pokemon Cristallo** (Gen 2 mGBA). Nuove ROI, layout GB/GBC
   (160×144, aspect 10:9), aggiungere `LAYOUT_MGBA_GB` in `_GAME_BY_GENERATION`.

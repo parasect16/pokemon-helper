@@ -13,6 +13,10 @@ gioco, e contiene le coordinate normalizzate esattamente come le dichiara
 della finestra: si ricalibra quando cambia il *gioco*, non quando si
 ridimensiona mGBA.
 
+Oltre al JSON c'è `format_rois_snippet`, che scrive le stesse ROI come
+literal Python: il JSON serve all'app su questa macchina, lo snippet serve a
+promuovere una calibrazione buona a default del repo.
+
 Politica di lettura, deliberatamente tutto-o-niente: un file illeggibile,
 malformato o con un solo rettangolo fuori range viene scartato **intero** e
 si torna ai default, con un avviso in console. Applicarne metà produrrebbe
@@ -171,6 +175,45 @@ def resolve_rois(game_key: str, store: RoiStore | None = None) -> tuple[GameLayo
     layout, base = GAME_ROIS[game_key]
     resolved = (store if store is not None else RoiStore()).load(game_key, base)
     return layout, resolved
+
+
+def format_rois_snippet(rois: GameRois, game_key: str) -> str:
+    """Le ROI come literal Python, pronto da incollare in `roi.py`.
+
+    È la seconda forma di serializzazione, e ha uno scopo diverso dal JSON:
+    il file utente vale su una macchina, questo testo vale per tutti. Una
+    calibrazione fatta bene, magari per un gioco che il repo non supporta
+    ancora, deve poter diventare il default invece di restare sul disco di
+    chi l'ha fatta.
+
+    Le coordinate sono arrotondate a tre decimali come quelle scritte a mano:
+    un pixel nativo su 240 vale 0.0042, quindi l'arrotondamento sposta al
+    massimo un decimo di pixel. `w` e `h` vengono poi ricondotti dentro il
+    bordo, perché due arrotondamenti per eccesso sullo stesso asse potrebbero
+    far sforare `x + w > 1` e `Roi` rifiuterebbe il proprio snippet.
+    """
+    lines = [f"ROIS_{game_key.upper()} = GameRois("]
+    for name in _SINGLE_ROI_FIELDS:
+        lines.append(f"    {name}={_format_roi(getattr(rois, name))},")
+    lines.append("    team_menu=TeamMenuRois(")
+    for field in _TEAM_MENU_FIELDS:
+        lines.append(f"        {field}=(")
+        for index, roi in enumerate(getattr(rois.team_menu, field)):
+            comment = "slot attivo" if index == 0 else f"slot {index + 1}"
+            lines.append(f"            {_format_roi(roi)},  # {comment}")
+        lines.append("        ),")
+    lines.append("    ),")
+    lines.append(")")
+    return "\n".join(lines) + "\n"
+
+
+def _format_roi(roi: Roi) -> str:
+    """Un `Roi(...)` con tre decimali, garantito dentro i bordi."""
+    x = round(roi.x, 3)
+    y = round(roi.y, 3)
+    w = min(round(roi.w, 3), round(1.0 - x, 3))
+    h = min(round(roi.h, 3), round(1.0 - y, 3))
+    return f"Roi(x={x:.3f}, y={y:.3f}, w={w:.3f}, h={h:.3f})"
 
 
 def _roi_to_payload(roi: Roi) -> dict[str, float]:

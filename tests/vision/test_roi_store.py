@@ -10,12 +10,13 @@ import json
 
 import pytest
 
-from pokemon_helper.vision.roi import GAME_ROIS, ROIS_FIRERED, Roi, TeamMenuRois
+from pokemon_helper.vision.roi import GAME_ROIS, ROIS_FIRERED, GameRois, Roi, TeamMenuRois
 from pokemon_helper.vision.roi_store import (
     ROI_STORE_VERSION,
     RoiStore,
     default_roi_dir,
     deserialize_rois,
+    format_rois_snippet,
     resolve_rois,
     serialize_rois,
 )
@@ -245,3 +246,61 @@ def _with_opponent_name(roi: Roi):
             slot_levels=BASE.team_menu.slot_levels,
         ),
     )
+
+
+# ------------------------------------------------------------------ snippet
+
+
+def _eval_snippet(snippet: str) -> GameRois:
+    """Esegue lo snippet come lo farebbe `roi.py` e ne ritorna le ROI."""
+    namespace: dict = {"GameRois": GameRois, "Roi": Roi, "TeamMenuRois": TeamMenuRois}
+    exec(snippet, namespace)  # noqa: S102 - è il punto del test: deve essere codice valido
+    return namespace["ROIS_FIRERED"]
+
+
+def test_the_snippet_is_valid_python_that_rebuilds_the_rois() -> None:
+    """La prova vera: incollarlo in `roi.py` deve funzionare."""
+    rebuilt = _eval_snippet(format_rois_snippet(BASE, "firered"))
+
+    assert rebuilt.opponent_name.x == pytest.approx(BASE.opponent_name.x, abs=5e-4)
+    assert len(rebuilt.team_menu.slot_areas) == 6
+    assert len(rebuilt.team_menu.slot_levels) == 6
+
+
+def test_every_rectangle_survives_the_round_trip() -> None:
+    """Tre decimali: lo scarto ammesso è un decimo di pixel nativo."""
+    rebuilt = _eval_snippet(format_rois_snippet(BASE, "firered"))
+
+    for name in ("opponent_name", "opponent_hp_bar", "player_name", "party_menu_sentinel"):
+        original = getattr(BASE, name)
+        copy = getattr(rebuilt, name)
+        assert copy.x == pytest.approx(original.x, abs=5e-4)
+        assert copy.y == pytest.approx(original.y, abs=5e-4)
+        assert copy.w == pytest.approx(original.w, abs=5e-4)
+        assert copy.h == pytest.approx(original.h, abs=5e-4)
+    for index in range(6):
+        assert rebuilt.team_menu.slot_levels[index].y == pytest.approx(
+            BASE.team_menu.slot_levels[index].y, abs=5e-4
+        )
+
+
+def test_the_snippet_is_named_after_the_game() -> None:
+    assert format_rois_snippet(BASE, "crystal").startswith("ROIS_CRYSTAL = GameRois(")
+
+
+def test_the_slots_are_commented_as_the_game_numbers_them() -> None:
+    snippet = format_rois_snippet(BASE, "firered")
+
+    assert "# slot attivo" in snippet
+    assert "# slot 6" in snippet
+    assert "# slot 0" not in snippet
+
+
+def test_a_rectangle_touching_the_right_edge_still_parses() -> None:
+    """Due arrotondamenti per eccesso sullo stesso asse sforerebbero `Roi`."""
+    edge = _with_opponent_name(Roi(x=0.9996, y=0.9996, w=0.0004, h=0.0004))
+
+    rebuilt = _eval_snippet(format_rois_snippet(edge, "firered"))
+
+    assert rebuilt.opponent_name.x + rebuilt.opponent_name.w <= 1.0
+    assert rebuilt.opponent_name.y + rebuilt.opponent_name.h <= 1.0
