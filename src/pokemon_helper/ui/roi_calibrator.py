@@ -18,6 +18,10 @@ Due scelte che tolgono di mezzo gli errori tipici:
 - **Coordinate native sempre a schermo.** Il riquadro selezionato mostra
   `x, y, w, h` in pixel del gioco, non del frame: sono i numeri che si
   possono confrontare con uno screenshot e con `roi.py`.
+- **Si vede cosa ci si legge dentro.** Sotto l'elenco compaiono il ritaglio
+  ingrandito e il testo che ne esce: è la differenza fra un rettangolo che
+  sembra giusto e uno che lo è. Entrambi i bug di calibrazione di questo repo
+  sono sopravvissuti a un'ispezione visiva e sono morti alla prima lettura.
 
 Il disegno vive in `_RoiCanvas`, che non sa nulla di calibrazione: riceve un
 frame, un insieme di ROI e una selezione, ed emette il rettangolo che l'utente
@@ -86,11 +90,23 @@ _DEFAULT_ZOOM_PERCENT = 100
 # Lo zoom fine si mette dopo, sul rettangolo che interessa.
 _FIT_TARGET_WIDTH = 900
 
+# Larghezza a cui ingrandire il ritaglio di anteprima. Un nome di Pokemon sta
+# in ~46x11 pixel nativi: a dimensione naturale non ci si legge nulla, e il
+# punto dell'anteprima è proprio leggere.
+_PREVIEW_WIDTH = 240
+
 # Intestazioni dei due gruppi nell'elenco dei bersagli.
 _SCREEN_HEADERS = {
     SCREEN_BATTLE: "— Schermata di combattimento —",
     SCREEN_PARTY_MENU: "— Elenco Pokemon —",
 }
+
+
+# Firma di chi legge un ritaglio: riceve l'immagine ritagliata e la chiave del
+# bersaglio, ritorna una riga da mostrare. Il "come" sta fuori dal dialogo —
+# OCR per i box di testo, conteggio di pixel per la barra PS — perché sono
+# tutte cose che vivono in `vision` e trascinano numpy e i modelli ONNX.
+RoiReader = Callable[[Image.Image, str], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +372,7 @@ class RoiCalibratorDialog(QDialog):
         game_key: str,
         defaults: GameRois | None = None,
         frame_source: Callable[[], CalibrationFrame] | None = None,
+        reader: RoiReader | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -366,11 +383,18 @@ class RoiCalibratorDialog(QDialog):
         self._rois = rois
         self._defaults = defaults if defaults is not None else rois
         self._frame_source = frame_source
+        self._reader = reader
+        self._image = frame.image
 
         self._targets_list = QListWidget()
         self._hint = QLabel()
         self._hint.setWordWrap(True)
         self._coords = QLabel()
+        self._preview = QLabel()
+        self._preview.setMinimumHeight(60)
+        self._preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._readback = QLabel()
+        self._readback.setWordWrap(True)
         self._screen_banner = QLabel()
         self._screen_banner.setWordWrap(True)
         self._canvas = _RoiCanvas()
@@ -405,9 +429,13 @@ class RoiCalibratorDialog(QDialog):
         self._layout_info = frame.layout
         self._screen = frame.screen
         self._screen_note = frame.note
+        self._image = frame.image
         self._canvas.set_frame(frame)
         self._canvas.set_rois(self._rois)
         self._refresh_screen_banner()
+        key = self.selected_key()
+        if key is not None:
+            self._refresh_readback(key)
 
     def selected_key(self) -> str | None:
         item = self._targets_list.currentItem()
@@ -438,6 +466,8 @@ class RoiCalibratorDialog(QDialog):
         left.addWidget(self._targets_list, stretch=1)
         left.addWidget(self._hint)
         left.addWidget(self._coords)
+        left.addWidget(self._preview)
+        left.addWidget(self._readback)
         left.addWidget(self._reset_button)
 
         right_header = QHBoxLayout()
@@ -490,6 +520,7 @@ class RoiCalibratorDialog(QDialog):
         self._hint.setText(TARGETS_BY_KEY[key].hint)
         self._refresh_coords(key)
         self._refresh_screen_banner()
+        self._refresh_readback(key)
 
     def _on_capture(self) -> None:
         """Rilegge la finestra dell'emulatore e mostra il nuovo frame.
@@ -533,6 +564,7 @@ class RoiCalibratorDialog(QDialog):
         self._rois = replace_roi(self._rois, key, roi)
         self._canvas.set_rois(self._rois)
         self._refresh_coords(key)
+        self._refresh_readback(key)
 
     def _on_reset_current(self) -> None:
         """Riporta il solo rettangolo selezionato al valore di fabbrica."""
@@ -543,3 +575,33 @@ class RoiCalibratorDialog(QDialog):
 
     def _refresh_coords(self, key: str) -> None:
         self._coords.setText(format_native_rect(get_roi(self._rois, key), self._layout_info))
+
+    def _refresh_readback(self, key: str) -> None:
+        """Mostra il ritaglio del rettangolo e cosa ci si legge dentro.
+
+        L'anteprima è ingrandita a interpolazione nulla: i font sono pixel
+        art, e qualunque levigatura renderebbe più leggibile l'anteprima di
+        quanto non lo sia il ritaglio vero, che è l'opposto di ciò che serve.
+
+        Senza un `reader` resta la sola anteprima: già quella dice se il
+        rettangolo taglia il testo a metà.
+        """
+        crop = self._crop_for(key)
+        self._preview.setPixmap(
+            QPixmap.fromImage(pil_to_qimage(crop)).scaledToWidth(
+                _PREVIEW_WIDTH, Qt.TransformationMode.FastTransformation
+            )
+        )
+        if self._reader is None:
+            self._readback.setText("")
+            return
+        try:
+            self._readback.setText(self._reader(crop, key))
+        except Exception as exc:  # noqa: BLE001 — una lettura fallita non chiude il dialogo
+            self._readback.setText(f"\u26a0 lettura fallita: {exc}")
+
+    def _crop_for(self, key: str) -> Image.Image:
+        """Il ritaglio del frame corrente sul rettangolo indicato."""
+        game_area = compute_game_area(self._image.width, self._image.height, self._layout_info)
+        rect = roi_to_pixels(get_roi(self._rois, key), game_area)
+        return self._image.crop(rect.as_crop_box())

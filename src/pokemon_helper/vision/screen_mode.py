@@ -125,7 +125,7 @@ def classify_screen(
     """
     game_area = compute_game_area(frame.width, frame.height, layout)
 
-    hp_pixels = _count_hp_bar_pixels(
+    hp_pixels = count_hp_bar_pixels(
         np.asarray(
             frame.crop(roi_to_pixels(rois.opponent_hp_bar, game_area).as_crop_box()).convert("RGB")
         )
@@ -196,7 +196,7 @@ def _teal_fraction(arr: np.ndarray) -> float:
     return float(teal.mean())
 
 
-def _count_hp_bar_pixels(arr: np.ndarray) -> int:
+def count_hp_bar_pixels(arr: np.ndarray) -> int:
     """Conta i pixel dell'array RGB che matchano i colori della barra HP.
 
     La barra HP FRLG usa 3 stati:

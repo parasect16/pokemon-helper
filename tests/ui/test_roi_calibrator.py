@@ -405,3 +405,97 @@ def _select_key(dialog: RoiCalibratorDialog, key: str) -> None:
             dialog._targets_list.setCurrentRow(row)
             return
     raise AssertionError(f"bersaglio {key} non in elenco")
+
+
+# ----------------------------------------------------------------- lettura
+
+
+def test_the_preview_shows_the_crop_of_the_selected_rectangle(dialog) -> None:
+    """Il ritaglio ingrandito: già da solo dice se il box taglia il testo."""
+    pixmap = dialog._preview.pixmap()
+
+    assert pixmap is not None
+    assert not pixmap.isNull()
+    assert pixmap.width() == 240
+
+
+def test_the_preview_follows_the_selection(dialog) -> None:
+    first = dialog._preview.pixmap().size()
+
+    _select_key(dialog, "opponent_hp_bar")
+
+    assert dialog._preview.pixmap().size() != first
+
+
+def test_without_a_reader_there_is_no_text(dialog) -> None:
+    assert dialog._readback.text() == ""
+
+
+def test_the_reader_gets_the_crop_and_the_key(qtbot, frame) -> None:
+    seen: list = []
+
+    def reader(crop, key):
+        seen.append((crop.size, key))
+        return f"letto su {key}"
+
+    dialog = RoiCalibratorDialog(frame=frame, rois=ROIS_FIRERED, game_key="firered", reader=reader)
+    qtbot.addWidget(dialog)
+
+    assert dialog._readback.text() == "letto su opponent_name"
+    assert seen[-1][1] == "opponent_name"
+    assert seen[-1][0][0] > 0
+
+
+def test_the_reading_refreshes_after_a_draw(qtbot, frame) -> None:
+    """È il ciclo che serve: disegni, leggi, correggi."""
+    sizes: list = []
+
+    def reader(crop, key):  # noqa: ARG001
+        sizes.append(crop.size)
+        return f"{crop.size[0]}x{crop.size[1]}"
+
+    dialog = RoiCalibratorDialog(frame=frame, rois=ROIS_FIRERED, game_key="firered", reader=reader)
+    qtbot.addWidget(dialog)
+    before = dialog._readback.text()
+
+    dialog._on_roi_drawn("opponent_name", Roi(x=0.1, y=0.1, w=0.5, h=0.5))
+
+    assert dialog._readback.text() != before
+    assert len(sizes) >= 2
+
+
+def test_a_reader_that_blows_up_does_not_close_the_dialog(qtbot, frame) -> None:
+    """Un crop degenere o un modello che si lamenta non devono buttare via il lavoro."""
+
+    def reader(crop, key):  # noqa: ARG001
+        raise RuntimeError("modello non caricato")
+
+    dialog = RoiCalibratorDialog(frame=frame, rois=ROIS_FIRERED, game_key="firered", reader=reader)
+    qtbot.addWidget(dialog)
+
+    assert "lettura fallita" in dialog._readback.text()
+    assert "modello non caricato" in dialog._readback.text()
+
+
+def test_capturing_a_new_frame_re_reads_the_selected_rectangle(qtbot, image, frame) -> None:
+    """Dopo la ricattura il testo mostrato deve venire dal frame nuovo."""
+    calls: list = []
+
+    def reader(crop, key):  # noqa: ARG001
+        calls.append(key)
+        return f"lettura {len(calls)}"
+
+    other = CalibrationFrame(image=image, layout=LAYOUT, screen=SCREEN_PARTY_MENU)
+    dialog = RoiCalibratorDialog(
+        frame=frame,
+        rois=ROIS_FIRERED,
+        game_key="firered",
+        reader=reader,
+        frame_source=lambda: other,
+    )
+    qtbot.addWidget(dialog)
+    before = dialog._readback.text()
+
+    dialog._capture_button.click()
+
+    assert dialog._readback.text() != before

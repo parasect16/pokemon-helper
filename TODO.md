@@ -125,9 +125,14 @@ ois\<gioco>.json`, `RoiStore` load/save/clear,
     schermata), così il dialogo resta costruibile senza emulatore e senza gli
     extra `[vision]`; una cattura fallita si scrive nella riga di stato e
     lascia a schermo il frame precedente.
-  - `[ ]` **1.5 read-back dal vivo** — per ogni rettangolo disegnato, cosa ci
-    legge l'OCR. È la parte che ripaga: i due bug di calibrazione passati non
-    erano rettangoli storti a vedersi, erano rettangoli che leggevano altro.
+  - `[x]` **1.5 read-back dal vivo** — anteprima del ritaglio ingrandita a
+    interpolazione nulla + `vision/roi_probe.py`, che descrive cosa c'è dentro
+    in base al tipo di bersaglio: OCR per i box di testo, `read_level` cifra
+    per cifra per i livelli, conteggio dei pixel colore-PS per la barra
+    (l'unico bersaglio senza testo, e non gli si spende un'inferenza ONNX).
+    Verificato sulle catture live: ROI buona → `testo: "HEEZINGL.33" a 1.00`,
+    la stessa spostata di 20 px nativi → `nessun testo letto`. È esattamente
+    il bug di F3.18, che a occhio non si vedeva.
   - `[ ]` **1.6 salva / ripristina / esporta** — export di uno snippet Python
     per `roi.py`, così una calibrazione buona può diventare il default del
     repo invece di restare su una macchina.
