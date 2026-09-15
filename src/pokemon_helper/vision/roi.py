@@ -121,10 +121,13 @@ class GameRois:
 
     opponent_name: Roi
     opponent_sprite: Roi
+    # Non è una lettura di HP: `vision.screen_mode` ci conta i pixel dei colori
+    # della barra per decidere se il frame è una schermata di combattimento. È
+    # l'unico elemento presente su ogni schermata di battaglia e su nessun'altra.
+    # Nessun valore PS viene mai letto, né da qui né altrove.
     opponent_hp_bar: Roi
     player_name: Roi
     player_sprite: Roi
-    player_hp_bar: Roi
     # Pulsante in basso a destra dell'elenco Pokemon, usato da
     # `vision.screen_mode` come sentinella testuale della schermata.
     party_menu_sentinel: Roi
@@ -152,7 +155,8 @@ ROIS_FIRERED = GameRois(
     # Sprite avversario: metà alta destra. pHash è tollerante alle inclusioni
     # di sfondo, quindi il crop non deve essere perfettamente stretto.
     opponent_sprite=Roi(x=0.469, y=0.060, w=0.423, h=0.359),
-    # Barra HP avversario: barra colorata dopo la label "PS".
+    # Barra HP avversario: barra colorata dopo la label "PS". Serve a
+    # `screen_mode` per riconoscere la schermata, non a leggere gli HP.
     opponent_hp_bar=Roi(x=0.135, y=0.198, w=0.258, h=0.029),
     # --- Giocatore (metà bassa) ---
     # HUD del giocatore in basso-destra: riga nome+livello (esclude la barra
@@ -170,11 +174,6 @@ ROIS_FIRERED = GameRois(
     # reference indicizzate sono anch'esse 64x64, quindi crop e reference
     # hanno la stessa inquadratura.
     player_sprite=Roi(x=0.167, y=0.300, w=0.267, h=0.400),
-    # Barra HP giocatore: la barra colorata, esclusi sia la label "PS" a
-    # sinistra sia i numeri PS sotto. Il box precedente cadeva proprio sui
-    # numeri (y nativa 95-99): la barra vive a 90-95, misurata sulla stessa
-    # cattura seguendo il rosso del riempimento e il grigio della traccia.
-    player_hp_bar=Roi(x=0.718, y=0.563, w=0.208, h=0.032),
     # --- Menu Pokemon ---
     # Pulsante "ESCI", la pillola viola in basso a destra dell'elenco. Box
     # misurato per colore (il viola del pulsante, escluso il pokeball a

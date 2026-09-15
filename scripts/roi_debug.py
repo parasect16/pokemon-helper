@@ -74,7 +74,6 @@ def main() -> int:
         ("opp-hp", rois.opponent_hp_bar, "cyan"),
         ("player-name", rois.player_name, "orange"),
         ("player-sprite", rois.player_sprite, "magenta"),
-        ("player-hp", rois.player_hp_bar, "blue"),
     )
     for label, roi, color in labels:
         rect = roi_to_pixels(roi, game_area)

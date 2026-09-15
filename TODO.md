@@ -60,13 +60,14 @@ Convenzioni:
 
 ## Da fare — polish / feature
 
-- `[x]` **ROI `player_sprite` e `player_hp_bar`** ricalibrate misurando i
-  pixel su cattura 1119x734, non a occhio. `player_hp_bar` stava sui numeri
-  PS (y nativa 95-99) invece che sulla barra (90-95). `player_sprite`
-  arrivava a y nativa 124, dentro il box messaggi che comincia a 112, e
-  partiva 30 px a sinistra dello sprite: ora è lo slot 64x64 in cui la Gen 3
-  disegna gli sprite posteriori (x 40-104, y 48-112), la stessa inquadratura
-  delle reference indicizzate.
+- `[x]` **ROI `player_sprite`** ricalibrata misurando i pixel su cattura
+  1119x734, non a occhio: arrivava a y nativa 124, dentro il box messaggi che
+  comincia a 112, e partiva 30 px a sinistra dello sprite. Ora è lo slot 64x64
+  in cui la Gen 3 disegna gli sprite posteriori (x 40-104, y 48-112), la
+  stessa inquadratura delle reference indicizzate.
+  `player_hp_bar` era stata ricalibrata nella stessa tornata ed è poi stata
+  **rimossa**: nessun codice la leggeva, solo l'overlay diagnostico la
+  disegnava. Era un rettangolo da tarare per ogni gioco nuovo, a vuoto.
 
 - `[!]` **pHash sprite inutilizzabile in battaglia**. La cattura ha campo e
   cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la
@@ -75,6 +76,17 @@ Convenzioni:
   interamente sul nome. Per recuperare il canale servirebbe segmentare il
   soggetto dallo sfondo prima del hash (il fondo di battaglia è a bande di
   colore piatte, quindi un flood-fill dai bordi è plausibile).
+
+- `[ ]` **PS del giocatore via OCR** (idea, non pianificata). Oggi nessun
+  valore PS viene letto: `opponent_hp_bar` serve solo a `screen_mode` per
+  riconoscere la schermata di combattimento, e la ROI `player_hp_bar` è stata
+  rimossa perché non aveva nessun consumatore. Se un giorno servono i PS,
+  leggere i **numeri** ("112/112") con l'OCR e non la lunghezza della barra:
+  la barra dà una frazione approssimata e va tarata sui colori di ogni gioco,
+  i numeri danno il valore esatto con lo stesso motore già in uso. Solo lato
+  giocatore — di quelli avversari il gioco non mostra le cifre. Serve una ROI
+  nuova sui numeri PS dell'HUD (y nativa 95-99 in FRLG, misurata quando
+  `player_hp_bar` ci cadeva sopra per errore).
 
 - `[ ]` **Calibratore ROI visuale** (~4-6h). Dialog con canvas su screenshot,
   utente disegna rettangoli per (nome opp, sprite opp, HUD player, ecc.).
