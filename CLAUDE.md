@@ -37,6 +37,19 @@ un effetto collaterale del lavoro.
 - **Mai** fare `push` (né su `main` né sul branch) senza richiesta esplicita.
   Niente merge, niente PR se non richiesti.
 
+## Versione
+
+Unica sorgente: `version` in `pyproject.toml`. `pokemon_helper.__version__` la
+legge dai metadati del pacchetto installato, quindi non va aggiornato a mano.
+
+- **Ogni branch nuovo bumpa la patch** come primo commit del branch: `0.1.0b1`
+  → `0.1.0b2` → `0.1.0b3`. Serve a distinguere due build senza dover
+  guardare l'hash del commit.
+- Le beta seguono **PEP 440** (`0.1.0b1`, non `0.1.0-beta.1`): è il formato
+  che `pip` riconosce come pre-release e che non installa senza `--pre`.
+- Il branch `beta` integra i branch di lavoro finiti. Ogni pubblicazione di
+  beta viene **taggata** `v<versione>` con tag annotato.
+
 ## Commit
 
 **Conventional Commits** con scope tra parentesi. Formato:
