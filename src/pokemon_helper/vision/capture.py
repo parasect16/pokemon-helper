@@ -80,6 +80,13 @@ class WindowCapture:
         self._requested = threading.Event()
         self._ready = threading.Event()
         self._closed = threading.Event()
+        # `_closed` dice "la sessione corrente è finita", e una sessione finita
+        # viene riaperta al volo: è così che si sopravvive alla chiusura e
+        # riapertura dell'emulatore. `_stopped` dice invece "non riaprirla
+        # più", ed è quello che serve in chiusura dell'app — senza, chiudere
+        # la cattura mentre un riconoscimento è in volo la fa semplicemente
+        # rinascere, e la sessione resta appesa dopo l'uscita.
+        self._stopped = threading.Event()
         self._frame: tuple[object, int, int] | None = None
         self._lock = threading.Lock()
 
@@ -95,6 +102,13 @@ class WindowCapture:
         with self._lock:
             self._frame = None
         self._requested.set()
+
+        # `close()` sblocca chi sta aspettando alzando `_ready`; se è successo
+        # nell'istante fra `_ensure_session` e la `clear()` qui sopra, quel
+        # segnale è appena stato cancellato e l'attesa durerebbe il timeout
+        # pieno. Ricontrollare qui costa niente e toglie la finestra.
+        if self._stopped.is_set():
+            raise CaptureError("cattura chiusa mentre era in corso una richiesta di frame")
 
         if not self._ready.wait(timeout_seconds):
             self._requested.clear()
@@ -126,9 +140,21 @@ class WindowCapture:
         return CapturedFrame(image=image, width=width, height=height)
 
     def close(self) -> None:
-        """Chiude la sessione. Sicura da chiamare più volte."""
+        """Chiude la sessione definitivamente. Sicura da chiamare più volte.
+
+        Dopo `close()` l'oggetto non cattura più: una richiesta successiva
+        alza `CaptureError` invece di riaprire. Chiudere sblocca subito una
+        `capture_frame` in attesa, che è ciò che rende la chiusura dell'app
+        immediata anche con un riconoscimento in corso.
+        """
+        self._stopped.set()
+        self._teardown()
+
+    def _teardown(self) -> None:
+        """Ferma la sessione corrente, senza vietarne di future."""
         control, self._control = self._control, None
         self._closed.set()
+        self._ready.set()
         if control is None:
             return
         try:
@@ -148,11 +174,13 @@ class WindowCapture:
 
     def _ensure_session(self) -> None:
         """Avvia la sessione se non c'è, o se è morta."""
+        if self._stopped.is_set():
+            raise CaptureError("cattura chiusa: la sessione non viene riaperta")
         if self._control is not None and not self._closed.is_set():
             return
         if self._control is not None:
             # Sessione morta: l'emulatore è stato chiuso. Ripulisci e riparti.
-            self.close()
+            self._teardown()
 
         self._closed.clear()
         # Non passiamo `draw_border`: su alcune build di Windows la Graphics

@@ -71,10 +71,23 @@ class _RecognizeWorker:
       inizializzato evita stalli imprevedibili nei daemon thread "freschi".
     - Serializzare le richieste (hotkey + pulsante) evita concorrenze sulla
       stessa capture session e sull'inference ONNX di RapidOCR.
+
+    In chiusura il worker non si limita a mettere in coda il sentinella di
+    uscita: la coda viene svuotata (i job accodati e mai partiti non devono
+    più partire), `cancelled` passa a vero perché quello *in corso* possa
+    uscire al primo controllo utile, e `stop` aspetta il thread per un tempo
+    limitato invece di dare per scontato che finisca.
     """
+
+    # Quanto aspettare il job in corso prima di lasciarlo andare. Il worker è
+    # un daemon thread: se sfora, il processo esce comunque. Il valore copre
+    # un riconoscimento intero (cattura ~9 ms + 12 OCR sui sei slot, ~200 ms
+    # in tutto) con un ordine di grandezza di margine.
+    STOP_TIMEOUT_SECONDS = 2.0
 
     def __init__(self) -> None:
         self._queue: queue.Queue[Callable[[], None] | None] = queue.Queue()
+        self._stopping = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
             name="recognize-worker",
@@ -82,18 +95,55 @@ class _RecognizeWorker:
         )
         self._thread.start()
 
+    @property
+    def cancelled(self) -> bool:
+        """Vero da quando `stop()` è stato chiamato.
+
+        I job lunghi lo controllano fra una fase e l'altra per uscire senza
+        toccare risorse che l'app sta smontando.
+        """
+        return self._stopping.is_set()
+
     def submit(self, job: Callable[[], None]) -> None:
-        """Accoda un job. Ritorna subito; il worker lo esegue in FIFO."""
+        """Accoda un job. Ritorna subito; il worker lo esegue in FIFO.
+
+        Dopo `stop()` è un no-op: in chiusura le richieste che arrivano
+        ancora (un tick del poller già partito, una hotkey premuta) non hanno
+        più nessuno a cui consegnare il risultato.
+        """
+        if self._stopping.is_set():
+            return
         self._queue.put(job)
 
-    def stop(self) -> None:
-        """Segnala al worker di uscire; usato all'exit dell'app."""
+    def stop(self, timeout: float | None = None) -> bool:
+        """Ferma il worker e aspetta il job in corso. Ritorna se è uscito.
+
+        Usato all'exit dell'app. Un `False` non è un errore fatale — il thread
+        è daemon — ma va stampato: significa che qualcosa è rimasto appeso
+        oltre il previsto, ed è l'unico punto in cui lo si può notare.
+        """
+        wait_for = self.STOP_TIMEOUT_SECONDS if timeout is None else timeout
+        self._stopping.set()
+        self._drain()
         self._queue.put(None)
+        self._thread.join(wait_for)
+        if self._thread.is_alive():
+            print(f"[recognize-worker] job ancora in corso dopo {wait_for:g}s: abbandonato")
+            return False
+        return True
+
+    def _drain(self) -> None:
+        """Svuota la coda dei job non ancora partiti."""
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                return
 
     def _run(self) -> None:
         while True:
             job = self._queue.get()
-            if job is None:
+            if job is None or self._stopping.is_set():
                 return
             try:
                 job()
@@ -169,6 +219,9 @@ class _BattlePoller:
 
     def _poll(self) -> None:
         """Thread worker: cattura, classifica, emette l'eventuale evento."""
+        if self._worker.cancelled:
+            self._busy.clear()
+            return
         try:
             event = self._watcher.observe(*self._probe())
             if event is not None:
@@ -193,6 +246,11 @@ _GAME_BY_GENERATION: dict[int, str] = {
 # soglia si preferisce non toccare nulla piuttosto che scrivere una specie
 # sbagliata.
 MIN_RECOGNITION_CONFIDENCE = 0.6
+
+# Quanto la GUI aspetta il frame che ha chiesto al worker per il calibratore.
+# Una cattura costa ~50 ms; il margine copre il caso in cui il worker stia
+# finendo un riconoscimento appena partito.
+CALIBRATION_CAPTURE_TIMEOUT_S = 10.0
 
 
 def default_db_path() -> Path:
@@ -304,19 +362,31 @@ def _init_recognize_hotkey(
     recognize (overhead ~1 ms). Zero contesa con il thread GUI, zero rischio.
     """
     try:
-        from pokemon_helper.vision.battle_detector import (
-            is_battle_screen,
-            is_party_menu_screen,
-        )
         from pokemon_helper.vision.battle_watcher import BattleEvent, BattleWatcher
         from pokemon_helper.vision.capture import CaptureError, WindowCapture
         from pokemon_helper.vision.chrome import resolve_layout
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
         from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
+        from pokemon_helper.vision.roi_probe import make_reader
+        from pokemon_helper.vision.roi_store import RoiStore, resolve_rois
+        from pokemon_helper.vision.screen_mode import ScreenMode, classify_screen
     except ImportError as exc:
         print(f"[vision] deps non installate, riconoscimento disabilitato: {exc}")
         return None
+
+    # Le ROI effettive sono i default del repo più l'eventuale calibrazione
+    # dell'utente. Il resolver legge un file, quindi il risultato si tiene in
+    # cache: `probe` gira due volte al secondo e non deve rileggere il disco
+    # a ogni giro. Quando il calibratore salverà, sarà lui a invalidarla.
+    roi_store = RoiStore()
+    resolved_rois: dict[str, tuple] = {}
+
+    def rois_for(game_key: str) -> tuple:
+        """Layout e ROI del gioco, risolti una volta sola per sessione."""
+        if game_key not in resolved_rois:
+            resolved_rois[game_key] = resolve_rois(game_key, roi_store)
+        return resolved_rois[game_key]
 
     capture = WindowCapture("mGBA")
     # Istanza singola condivisa. Warm-up eseguito in background per evitare
@@ -359,7 +429,11 @@ def _init_recognize_hotkey(
             if game_key is None:
                 bridge.opponent_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
-            layout, rois = GAME_ROIS[game_key]
+            layout, rois = rois_for(game_key)
+            # L'app si sta chiudendo: non aprire una cattura che nessuno
+            # aspetta più. Il controllo si ripete dopo ogni fase lunga.
+            if worker.cancelled:
+                return
             frame = capture.capture_frame(timeout_seconds=3.0)
             # Il chrome della finestra dipende da Windows e dal DPI, non dal
             # gioco: si misura sul frame invece di fidarsi del valore nel layout.
@@ -368,10 +442,13 @@ def _init_recognize_hotkey(
             # Guard: se la barra HP avversario non ha pixel HP-colored, non
             # siamo in battaglia — non aggiornare l'avversario per evitare
             # falsi positivi (analog a `_team_snapshot_looks_like_menu`).
-            in_battle, reason = is_battle_screen(frame.image, layout, rois)
-            if not in_battle:
+            # Niente `ocr=`: qui interessa solo distinguere BATTLE da tutto
+            # il resto, e la sentinella dell'elenco Pokemon non servirebbe.
+            verdict = classify_screen(frame.image, layout, rois)
+            if verdict.mode is not ScreenMode.BATTLE:
+                detail = verdict.reason or f"({verdict.mode.label})"
                 bridge.opponent_failed.emit(
-                    f"schermata combattimento non rilevata {reason} — avversario non aggiornato"
+                    f"schermata combattimento non rilevata {detail} — avversario non aggiornato"
                 )
                 return
 
@@ -380,6 +457,8 @@ def _init_recognize_hotkey(
             # può essere solo uno dei 6 membri della squadra: restringiamo
             # il match a quell'insieme per aumentare la precisione anche
             # con OCR imperfetta e pHash rumoroso.
+            if worker.cancelled:
+                return
             team_ids = {slot.pokemon_id for slot in state.team if slot is not None}
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
@@ -422,9 +501,26 @@ def _init_recognize_hotkey(
             if game_key is None:
                 bridge.team_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
-            layout, rois = GAME_ROIS[game_key]
+            layout, rois = rois_for(game_key)
+            if worker.cancelled:
+                return
             frame = capture.capture_frame(timeout_seconds=3.0)
             layout = resolve_layout(frame.image, layout)
+
+            # Guard a monte: leggere i 6 slot costa 12 chiamate OCR, quindi
+            # conviene sapere prima se siamo davvero sull'elenco Pokemon.
+            # Qui passiamo `ocr=`: il colore teal da solo direbbe di sì anche
+            # su un'altra schermata a fondo teal, la sentinella "ESCI" no.
+            verdict = classify_screen(frame.image, layout, rois, ocr=ocr)
+            if verdict.mode is not ScreenMode.PARTY_MENU:
+                detail = verdict.reason or f"({verdict.mode.label})"
+                bridge.team_failed.emit(
+                    f"schermata Pokemon non rilevata {detail} — squadra non aggiornata"
+                )
+                return
+
+            if worker.cancelled:
+                return
             with PokemonRepository.open(db_path) as thread_repo:
                 recognizer = Recognizer(thread_repo, ocr)
                 results = recognizer.recognize_team(
@@ -435,10 +531,14 @@ def _init_recognize_hotkey(
                     nickname_map=state.nicknames,
                 )
 
+            # Seconda linea, dopo il guard sulla schermata: quello guarda un
+            # rettangolo, questa guarda cosa è stato davvero letto. Falliscono
+            # per cause diverse — elenco aperto ma ROI disallineate, per dirne
+            # una — quindi restano entrambe.
             looks_menu, reason = _team_snapshot_looks_like_menu(results)
             if not looks_menu:
                 bridge.team_failed.emit(
-                    f"schermata Pokemon non rilevata {reason} — squadra non aggiornata"
+                    f"lettura degli slot non coerente {reason} — squadra non aggiornata"
                 )
                 return
 
@@ -463,6 +563,94 @@ def _init_recognize_hotkey(
     team_panel.reloadOpponentRequested.connect(lambda: worker.submit(on_recognize))
     team_panel.reloadTeamRequested.connect(lambda: worker.submit(on_recognize_team))
 
+    def capture_calibration_frame(game_key: str):
+        """Un frame classificato per il calibratore, catturato dal worker.
+
+        La cattura deve girare sul thread del worker (apartment COM), ma il
+        calibratore vive sul thread GUI: il job viene accodato e il risultato
+        torna indietro da una coda. L'attesa blocca la GUI per la durata di
+        una cattura, ~50 ms, e succede solo quando l'utente preme un pulsante.
+        """
+        from pokemon_helper.ui.roi_calibrator import CalibrationFrame
+
+        layout, rois = rois_for(game_key)
+        outcome: queue.Queue = queue.Queue(maxsize=1)
+
+        def job() -> None:
+            try:
+                captured = capture.capture_frame(timeout_seconds=3.0)
+                measured = resolve_layout(captured.image, layout)
+                verdict = classify_screen(captured.image, measured, rois, ocr=ocr)
+                outcome.put(
+                    (
+                        CalibrationFrame(
+                            image=captured.image,
+                            layout=measured,
+                            screen=verdict.mode.value,
+                            note=verdict.reason,
+                        ),
+                        None,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - riportato a chi ha chiesto il frame
+                outcome.put((None, exc))
+
+        worker.submit(job)
+        try:
+            frame, error = outcome.get(timeout=CALIBRATION_CAPTURE_TIMEOUT_S)
+        except queue.Empty:
+            raise TimeoutError("il worker di cattura non ha risposto") from None
+        if error is not None:
+            raise error
+        return frame
+
+    def on_calibrate() -> None:
+        """Apre il calibratore sulle ROI del gioco della generazione corrente.
+
+        L'auto-detect viene sospeso per la durata: il dialogo e' modale ma il
+        timer continuerebbe a girare, e due catture in coda mentre si calibra
+        servono solo a far aspettare chi preme "Cattura".
+        """
+        from pokemon_helper.ui.roi_calibrator import RoiCalibratorDialog
+
+        game_key = _GAME_BY_GENERATION.get(state.generation)
+        if game_key is None:
+            team_panel.flash_opponent_reload_warning(
+                f"nessun gioco supportato per Gen {state.generation}"
+            )
+            return
+        try:
+            frame = capture_calibration_frame(game_key)
+        except Exception as exc:  # noqa: BLE001 - senza un frame non si calibra
+            team_panel.flash_opponent_reload_warning(f"cattura fallita: {exc}")
+            return
+
+        was_polling = state.auto_detect
+        if was_polling:
+            poller.set_enabled(False)
+        try:
+            _, current = rois_for(game_key)
+            dialog = RoiCalibratorDialog(
+                frame=frame,
+                rois=current,
+                game_key=game_key,
+                defaults=GAME_ROIS[game_key][1],
+                frame_source=lambda: capture_calibration_frame(game_key),
+                reader=make_reader(ocr),
+                parent=team_panel.window(),
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            roi_store.save(game_key, dialog.rois())
+            # La cache tiene il valore vecchio: senza questo, la calibrazione
+            # appena salvata non varrebbe fino al riavvio dell'app.
+            resolved_rois.pop(game_key, None)
+        finally:
+            if was_polling:
+                poller.set_enabled(True)
+
+    team_panel.calibrateRoisRequested.connect(on_calibrate)
+
     def probe() -> tuple[bool | None, tuple[str, ...] | None]:
         """Un giro di osservazione: siamo in battaglia, e chi c'è in campo.
 
@@ -486,18 +674,21 @@ def _init_recognize_hotkey(
         game_key = _GAME_BY_GENERATION.get(state.generation)
         if game_key is None:
             return False, None
-        layout, rois = GAME_ROIS[game_key]
+        layout, rois = rois_for(game_key)
         try:
             frame = capture.capture_frame(timeout_seconds=3.0).image
         except CaptureError, TimeoutError:
             return False, None
         layout = resolve_layout(frame, layout)
+        # Senza `ocr=`: la sentinella costerebbe un'OCR ogni 750 ms, e qui
+        # basta il colore. Un falso "elenco Pokemon" costa un giro di "non lo
+        # so", che è esattamente il costo di sbagliarsi al ribasso.
+        verdict = classify_screen(frame, layout, rois)
         # L'elenco Pokemon si apre *durante* la lotta per cambiare Pokemon:
         # non dice nulla sul combattimento, quindi non va letto come "finito".
-        if is_party_menu_screen(frame, layout):
+        if verdict.mode is ScreenMode.PARTY_MENU:
             return None, None
-        in_battle, _ = is_battle_screen(frame, layout, rois)
-        if not in_battle:
+        if verdict.mode is not ScreenMode.BATTLE:
             return False, None
         game_area = compute_game_area(frame.width, frame.height, layout)
         signature = tuple(
@@ -531,7 +722,13 @@ def _init_recognize_hotkey(
 
     # `capture` tiene aperta una sessione di Windows Graphics Capture: va
     # chiusa all'uscita, o il bordo attorno alla finestra resta disegnato.
-    return _HotkeyGroup([hotkey, team_hotkey, poller, worker, capture])
+    #
+    # L'ordine conta. Prima i produttori di lavoro (hotkey e poller), poi la
+    # cattura, che chiudendosi sblocca subito un `capture_frame` in attesa
+    # invece di lasciarlo scadere, e solo alla fine il worker, che aspetta il
+    # job in corso. Chiudere la cattura non la fa rinascere: dopo `close()`
+    # una richiesta alza `CaptureError` invece di riaprire la sessione.
+    return _HotkeyGroup([hotkey, team_hotkey, poller, capture, worker])
 
 
 class _HotkeyGroup:

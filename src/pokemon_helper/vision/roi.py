@@ -57,8 +57,12 @@ class PixelRect:
 class GameLayout:
     """Descrive come è disposto il gioco dentro una finestra emulatore."""
 
-    # Rapporto larghezza/altezza dell'area gioco (GBA = 3/2, GB/GBC = 10/9).
-    aspect_ratio: float
+    # Risoluzione nativa del gioco: GBA 240x160, GB/GBC 160x144. È la griglia
+    # su cui il gioco disegna davvero, quindi è anche la griglia su cui ha
+    # senso calibrare: un rettangolo che cade a metà di un pixel nativo non
+    # esiste nel gioco, esiste solo nell'immagine scalata dall'emulatore.
+    native_width: int
+    native_height: int
     # Chrome totale in cima alla finestra: title bar Windows + menu bar mGBA.
     # `windows-capture` in modalità default cattura l'INTERA finestra (non
     # solo il client area) su Win10/11, quindi va sottratto il titolo (~30 px
@@ -71,10 +75,28 @@ class GameLayout:
     # numero è il fallback di quando la misura non è attendibile.
     menu_offset_top: int = 52
 
+    def __post_init__(self) -> None:
+        if self.native_width <= 0 or self.native_height <= 0:
+            raise ValueError(f"native size must be positive, got {self.native_size}")
+
+    @property
+    def native_size(self) -> tuple[int, int]:
+        """Risoluzione nativa come `(larghezza, altezza)`."""
+        return (self.native_width, self.native_height)
+
+    @property
+    def aspect_ratio(self) -> float:
+        """Rapporto larghezza/altezza dell'area gioco (GBA = 3/2, GB/GBC = 10/9).
+
+        Derivato dalla risoluzione nativa invece che dichiarato a parte: erano
+        due modi di dire la stessa cosa, e uno dei due poteva sbagliare.
+        """
+        return self.native_width / self.native_height
+
 
 # Layout comuni per uso F3.
-LAYOUT_MGBA_GBA = GameLayout(aspect_ratio=240 / 160, menu_offset_top=52)
-LAYOUT_MGBA_GB = GameLayout(aspect_ratio=160 / 144, menu_offset_top=52)
+LAYOUT_MGBA_GBA = GameLayout(native_width=240, native_height=160, menu_offset_top=52)
+LAYOUT_MGBA_GB = GameLayout(native_width=160, native_height=144, menu_offset_top=52)
 
 
 # ROI standard per gioco. Coordinate misurate manualmente in coordinate
@@ -82,8 +104,8 @@ LAYOUT_MGBA_GB = GameLayout(aspect_ratio=160 / 144, menu_offset_top=52)
 # discrepanze visive nel debug.
 #
 # Layout schermo battaglia Rosso Fuoco (GBA 240×160):
-#   - Avversario in alto: barra nome+HP in alto-sx, sprite in alto-dx.
-#   - Giocatore in basso: barra nome+HP in basso-dx, sprite in basso-sx.
+#   - Avversario in alto: barra nome+HP in alto-sx.
+#   - Giocatore in basso: barra nome+HP in basso-dx.
 TEAM_SIZE = 6
 
 
@@ -94,21 +116,23 @@ class TeamMenuRois:
     - `slot_areas`: 6 rettangoli tight sul solo nome di ciascun slot. Fino
       alla ricalibrazione F3.14 coprivano anche la riga del livello; ora no,
       e `slot_levels` è l'unica sorgente per il numero.
-    - `slot_icons`: 6 rettangoli sulle mini icone del menu (fallback quando
-      l'OCR nome non trova match — es. nickname personalizzati).
     - `slot_levels`: 6 rettangoli tight sul solo indicatore di livello
       ("L.XX"). Un'OCR dedicata su un crop piccolo migliora molto la
       detection del numero rispetto a leggere l'intera area slot.
+
+    C'era anche `slot_icons`, 6 rettangoli sulle mini icone del menu, per un
+    fallback pHash quando l'OCR del nome non trovava match. Rimosso: la
+    confidenza di quel canale è `1 - distanza/18` e le distanze reali stavano
+    fra 16 e 24 anche sul match giusto, cioè sempre sotto la soglia di 0.60
+    con cui la squadra viene scritta. Non era inaffidabile, era inerte.
     """
 
     slot_areas: tuple[Roi, ...]
-    slot_icons: tuple[Roi, ...]
     slot_levels: tuple[Roi, ...]
 
     def __post_init__(self) -> None:
         for name, coll in (
             ("slot_areas", self.slot_areas),
-            ("slot_icons", self.slot_icons),
             ("slot_levels", self.slot_levels),
         ):
             if len(coll) != TEAM_SIZE:
@@ -117,14 +141,27 @@ class TeamMenuRois:
 
 @dataclass(frozen=True, slots=True)
 class GameRois:
-    """Insieme di ROI per un gioco (avversario + giocatore + menu squadra)."""
+    """Insieme di ROI per un gioco (avversario + giocatore + menu squadra).
+
+    Non ci sono ROI sugli sprite. Il pHash in combattimento è stato tolto: la
+    cattura ha campo e cielo dietro il Pokemon mentre le reference indicizzate
+    stanno su bianco, quindi la specie giusta non entrava nei primi tre a
+    nessun offset di ROI, e sul lato giocatore il ramo solo-sprite arrivava
+    perfino a decidere da solo quando l'OCR non leggeva nulla. Il verdetto sta
+    tutto sul nome. Se un giorno si segmenta il soggetto dallo sfondo prima di
+    hashare (vedi TODO), le ROI sprite tornano — ma insieme al resto.
+    """
 
     opponent_name: Roi
-    opponent_sprite: Roi
+    # Non è una lettura di HP: `vision.screen_mode` ci conta i pixel dei colori
+    # della barra per decidere se il frame è una schermata di combattimento. È
+    # l'unico elemento presente su ogni schermata di battaglia e su nessun'altra.
+    # Nessun valore PS viene mai letto, né da qui né altrove.
     opponent_hp_bar: Roi
     player_name: Roi
-    player_sprite: Roi
-    player_hp_bar: Roi
+    # Pulsante in basso a destra dell'elenco Pokemon, usato da
+    # `vision.screen_mode` come sentinella testuale della schermata.
+    party_menu_sentinel: Roi
     team_menu: TeamMenuRois
 
 
@@ -146,38 +183,27 @@ ROIS_FIRERED = GameRois(
     # `h` allargato da 0.057 a 0.065: con il box stretto l'OCR leggeva
     # "HEEZIHGL.33" (0.97), con questo "HEEZINGL.33" (1.00).
     opponent_name=Roi(x=0.016, y=0.129, w=0.407, h=0.065),
-    # Sprite avversario: metà alta destra. pHash è tollerante alle inclusioni
-    # di sfondo, quindi il crop non deve essere perfettamente stretto.
-    opponent_sprite=Roi(x=0.469, y=0.060, w=0.423, h=0.359),
-    # Barra HP avversario: barra colorata dopo la label "PS".
+    # Barra HP avversario: barra colorata dopo la label "PS". Serve a
+    # `screen_mode` per riconoscere la schermata, non a leggere gli HP.
     opponent_hp_bar=Roi(x=0.135, y=0.198, w=0.258, h=0.029),
     # --- Giocatore (metà bassa) ---
     # HUD del giocatore in basso-destra: riga nome+livello (esclude la barra
     # HP che vive più in basso). Box alto, quindi tollerava lo sfasamento del
     # chrome anche prima di questa correzione.
     player_name=Roi(x=0.546, y=0.462, w=0.412, h=0.085),
-    # Sprite posteriore del giocatore in basso-sinistra. Ricalibrato su cattura
-    # 1119x734 misurando i pixel dello sprite: il box precedente arrivava a
-    # y nativa 124, cioè dentro il box messaggi (che comincia a 112), e
-    # partiva 30 px nativi a sinistra dello sprite.
-    #
-    # Questo è lo slot 64x64 nativo in cui la Gen 3 disegna gli sprite
-    # posteriori, ancorato in basso al bordo del campo: x 40-104, y 48-112.
-    # Prenderlo intero invece di ritagliare il singolo Pokemon è voluto — le
-    # reference indicizzate sono anch'esse 64x64, quindi crop e reference
-    # hanno la stessa inquadratura.
-    player_sprite=Roi(x=0.167, y=0.300, w=0.267, h=0.400),
-    # Barra HP giocatore: la barra colorata, esclusi sia la label "PS" a
-    # sinistra sia i numeri PS sotto. Il box precedente cadeva proprio sui
-    # numeri (y nativa 95-99): la barra vive a 90-95, misurata sulla stessa
-    # cattura seguendo il rosso del riempimento e il grigio della traccia.
-    player_hp_bar=Roi(x=0.718, y=0.563, w=0.208, h=0.032),
     # --- Menu Pokemon ---
+    # Pulsante "ESCI", la pillola viola in basso a destra dell'elenco. Box
+    # misurato per colore (il viola del pulsante, escluso il pokeball a
+    # sinistra) su due catture live di dimensioni diverse — 1119x734 e
+    # 1119x767 — che danno lo stesso rettangolo normalizzato a meno di
+    # 0.001. Un pelo più largo dei pixel misurati per non tagliare la "I"
+    # finale quando la finestra ha un'altra scala.
+    party_menu_sentinel=Roi(x=0.838, y=0.857, w=0.148, h=0.082),
     # Layout Rosso Fuoco: slot 0 grande a sinistra (Pokemon "attivo"), slot 1-5
     # righe compatte a destra. `slot_areas` è tight sul nome, `slot_levels`
     # sul solo "L.XX": i due box non si sovrappongono.
     # Coord estratte via `scripts/extract_roi_from_annotated.py` da immagine
-    # annotata a mano dall'utente (magenta=nome, ciano=icona, giallo=livello).
+    # annotata a mano dall'utente (magenta=nome, giallo=livello).
     team_menu=TeamMenuRois(
         slot_areas=(
             Roi(x=0.126, y=0.225, w=0.193, h=0.069),  # slot 0 (attivo, box sx)
@@ -186,14 +212,6 @@ ROIS_FIRERED = GameRois(
             Roi(x=0.489, y=0.389, w=0.216, h=0.050),
             Roi(x=0.489, y=0.540, w=0.216, h=0.050),
             Roi(x=0.486, y=0.690, w=0.217, h=0.050),  # slot 5
-        ),
-        slot_icons=(
-            Roi(x=0.014, y=0.215, w=0.105, h=0.126),  # slot 0 (attivo)
-            Roi(x=0.354, y=0.063, w=0.122, h=0.134),  # slot 1
-            Roi(x=0.354, y=0.215, w=0.124, h=0.134),
-            Roi(x=0.356, y=0.369, w=0.126, h=0.134),
-            Roi(x=0.356, y=0.516, w=0.126, h=0.134),
-            Roi(x=0.352, y=0.669, w=0.126, h=0.134),  # slot 5
         ),
         slot_levels=(
             Roi(x=0.197, y=0.299, w=0.062, h=0.045),  # slot 0 (attivo)
@@ -258,3 +276,62 @@ def roi_to_pixels(roi: Roi, game_area: PixelRect) -> PixelRect:
     pw = int(round(roi.w * game_area.w))
     ph = int(round(roi.h * game_area.h))
     return PixelRect(x=px, y=py, w=pw, h=ph)
+
+
+def pixels_to_roi(rect: PixelRect, game_area: PixelRect) -> Roi:
+    """Inversa di `roi_to_pixels`: da rettangolo del frame a ROI normalizzata.
+
+    Serve al calibratore, dove il rettangolo nasce da un trascinamento del
+    mouse sul frame catturato e va salvato in coordinate indipendenti dalla
+    dimensione della finestra.
+
+    Il rettangolo viene ritagliato dentro la game area invece di essere
+    rifiutato: si disegna col mouse, e sbordare sulla letterbox è normale.
+    Un rettangolo interamente fuori diventa degenere (larghezza o altezza
+    zero) — `Roi` lo accetta, ma `snap_roi_to_native` lo porta al minimo di
+    un pixel nativo, che è la forma in cui val la pena guardarlo.
+    """
+    if game_area.w <= 0 or game_area.h <= 0:
+        raise ValueError(f"game area must have positive size, got {game_area}")
+    left = _clamp01((rect.x - game_area.x) / game_area.w)
+    top = _clamp01((rect.y - game_area.y) / game_area.h)
+    right = _clamp01((rect.x + rect.w - game_area.x) / game_area.w)
+    bottom = _clamp01((rect.y + rect.h - game_area.y) / game_area.h)
+    return Roi(x=left, y=top, w=max(0.0, right - left), h=max(0.0, bottom - top))
+
+
+def snap_roi_to_native(roi: Roi, layout: GameLayout) -> Roi:
+    """Aggancia una ROI alla griglia di pixel nativa del gioco.
+
+    mGBA rende i 240x160 del GBA dentro una finestra qualunque, tipicamente a
+    un fattore non intero (4.26x sulla macchina di sviluppo): un rettangolo
+    disegnato col mouse cade quasi sempre a metà di un pixel nativo, e il
+    bordo che ne esce è mezzo sfocato. Tutte le ROI buone di questo repo sono
+    venute da una misura in pixel nativi; quelle disegnate a occhio sono state
+    tutte ricalibrate almeno una volta.
+
+    Il risultato ha sempre almeno un pixel nativo di lato e sta dentro i
+    bordi: un rettangolo vuoto o fuori campo non è un input da rifiutare, è
+    un trascinamento andato male.
+    """
+    width, height = layout.native_size
+    left = _clamp_int(round(roi.x * width), 0, width - 1)
+    top = _clamp_int(round(roi.y * height), 0, height - 1)
+    right = _clamp_int(round((roi.x + roi.w) * width), left + 1, width)
+    bottom = _clamp_int(round((roi.y + roi.h) * height), top + 1, height)
+    return Roi(
+        x=left / width,
+        y=top / height,
+        w=(right - left) / width,
+        h=(bottom - top) / height,
+    )
+
+
+def _clamp01(value: float) -> float:
+    """Riporta `value` dentro [0, 1]."""
+    return min(1.0, max(0.0, value))
+
+
+def _clamp_int(value: int, low: int, high: int) -> int:
+    """Riporta `value` dentro [low, high], con `low` prioritario se high < low."""
+    return max(low, min(value, high))

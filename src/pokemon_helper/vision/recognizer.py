@@ -1,18 +1,23 @@
 """Orchestratore di riconoscimento del Pokemon avversario.
 
-Combina i due segnali indipendenti prodotti dalle altre facciate del pacchetto
-`vision`:
+Il segnale è uno solo: l'**OCR del nome** via `OcrEngine`. Legge il riquadro
+nome+livello, filtra il livello (pattern `L.XX`) e passa il testo residuo a
+`PokemonRepository.find_by_fuzzy_name` per un match tollerante agli errori
+tipografici, con la mappa nickname dell'utente a coprire i Pokemon rinominati.
 
-- **OCR del nome** via `OcrEngine`: legge il riquadro nome+livello, filtra il
-  livello (pattern `L.XX`), passa il testo residuo a `PokemonRepository.
-  find_by_fuzzy_name` per un match tollerante agli errori tipografici.
-- **pHash dello sprite** via `compute_phash`: calcola il pHash del ritaglio
-  sprite avversario e cerca il match più vicino via
-  `PokemonRepository.find_pokemon_by_sprite_hash`.
+C'era un secondo canale, il pHash dello sprite, e non funzionava. In
+combattimento la cattura ha campo e cielo dietro il Pokemon mentre le
+reference indicizzate stanno su bianco: misurato sul vivo, la specie giusta
+stava a distanza 20-24 e specie sbagliate a 14-16, quindi non entrava nei
+primi tre a nessun offset di ROI. Lato avversario non superava mai la soglia
+e costava soltanto; lato giocatore, dove il match gira ristretto ai sei della
+squadra, c'era di peggio — a OCR muta il verdetto usciva dal ramo solo-sprite
+con confidenza 0.70, sopra la soglia di applicazione, scegliendo la distanza
+minima, cioè quasi sempre la specie sbagliata.
 
-Il risultato è un `Recognition` con id del Pokemon, confidenza combinata
-(0-1) e il segnale che ha vinto. La sorgente `both` è la più affidabile:
-significa che OCR e pHash convergono sullo stesso Pokemon.
+Per riabilitarlo servirebbe segmentare il soggetto dallo sfondo prima di
+hashare (i fondali di battaglia sono a bande piatte, un flood-fill dai bordi
+è plausibile). Finché non succede, hashare quel rettangolo è rumore.
 """
 
 from __future__ import annotations
@@ -27,7 +32,6 @@ from pokemon_helper.data import PokemonRepository
 from pokemon_helper.vision.level_reader import read_level
 from pokemon_helper.vision.ocr import OcrEngine, OcrResult
 from pokemon_helper.vision.roi import GameLayout, GameRois, compute_game_area, roi_to_pixels
-from pokemon_helper.vision.sprite_hash import compute_icon_phash, compute_phash
 
 # Pattern per riconoscere l'indicatore di livello: es. "L.33", "L 33", "Lv.33".
 _LEVEL_PATTERN = re.compile(r"^l\.?v?\.?\s*\d+$", re.IGNORECASE)
@@ -41,6 +45,14 @@ _LEVEL_EXTRACT = re.compile(r"l\.?v?\.?\s*(\d+)", re.IGNORECASE)
 # quindi il lookup esatto sulla mappa non basta.
 _NICKNAME_MIN_SIMILARITY = 0.72
 
+# Sopra questo score il fuzzy sul nome vale come verdetto pieno; sotto, il
+# candidato viene restituito con confidenza dimezzata e sta a chi chiama
+# decidere se applicarlo.
+_NAME_CONFIDENCE_THRESHOLD = 0.75
+
+# Pavimento di confidenza quando il match gira ristretto a un insieme noto.
+_RESTRICTED_CONFIDENCE_FLOOR = 0.7
+
 # Cifre che l'OCR produce al posto di lettere sui font pixel. Applicata solo
 # come secondo tentativo, quando il testo grezzo non ha prodotto match: i nomi
 # con cifra legittima (Porygon2) matchano al primo giro e non passano di qui.
@@ -49,13 +61,13 @@ _OCR_DIGIT_TO_LETTER = str.maketrans({"0": "O", "1": "I", "2": "Z", "5": "S", "8
 
 @dataclass(frozen=True, slots=True)
 class Recognition:
-    """Esito di un riconoscimento avversario."""
+    """Esito di un riconoscimento avversario o del Pokemon in campo."""
 
     pokemon_id: int
     confidence: float
-    source: str  # "both" | "name" | "sprite"
-    name_score: float | None = None
-    sprite_distance: int | None = None
+    # Punteggio del fuzzy match sul nome che ha prodotto il verdetto. Unico
+    # segnale rimasto, quindi è sempre valorizzato.
+    name_score: float
     debug: dict = field(default_factory=dict)
 
 
@@ -64,9 +76,9 @@ class TeamRecognition:
     """Esito del riconoscimento di uno slot della squadra dal menu Pokemon.
 
     `pokemon_id=None` significa "nessun match affidabile" (nickname
-    sconosciuto e icona non riconosciuta, oppure slot vuoto).
+    sconosciuto, oppure slot vuoto).
     `level=None` significa livello non decifrato.
-    `source`: "name" (OCR nome ha matchato), "icon" (fallback icona pHash),
+    `source`: "name" (fuzzy sul nome di specie), "nickname" (mappa utente),
     o "none" (nessun match).
     """
 
@@ -100,7 +112,6 @@ class Recognizer:
             frame,
             layout,
             name_roi=rois.opponent_name,
-            sprite_roi=rois.opponent_sprite,
             generation=generation,
         )
 
@@ -116,10 +127,9 @@ class Recognizer:
     ) -> Recognition | None:
         """Riconosce il Pokemon del giocatore (back sprite + HUD basso-dx).
 
-        `restrict_to_ids`: se passato, sia il fuzzy match sul nome sia il
-        match pHash sullo sprite vengono filtrati a quel set. Utile per
-        vincolare il player attivo ai soli 6 membri della squadra, che è
-        quello che deve essere per definizione.
+        `restrict_to_ids`: se passato, il fuzzy match sul nome viene filtrato
+        a quel set. Utile per vincolare il player attivo ai soli 6 membri
+        della squadra, che è quello che deve essere per definizione.
 
         `nickname_map`: l'HUD del giocatore mostra il nickname, non il nome
         di specie, quindi il fuzzy sui nomi di specie fallisce su ogni
@@ -130,7 +140,6 @@ class Recognizer:
             frame,
             layout,
             name_roi=rois.player_name,
-            sprite_roi=rois.player_sprite,
             generation=generation,
             restrict_to_ids=restrict_to_ids,
             nickname_map=nickname_map,
@@ -144,7 +153,6 @@ class Recognizer:
         generation: int,
         *,
         min_similarity: float = 0.55,
-        icon_max_distance: int = 18,
         nickname_map: dict[str, int] | None = None,
     ) -> list[TeamRecognition]:
         """Riconosce i 6 slot della squadra dalla schermata elenco Pokemon.
@@ -155,22 +163,17 @@ class Recognizer:
         2. Se il testo OCR (uppercase) è in `nickname_map`, usa direttamente
            il `pokemon_id` mappato con confidenza 1.0 (source='nickname').
         3. Altrimenti fuzzy match sul nome via repository.
-        4. Se il fuzzy non trova nulla (probabile nickname sconosciuto),
-           fallback su pHash dell'icona menu contro il subset `side='icon'`
-           di `sprite_hashes`.
 
         `nickname_map` mappa testo OCR normalizzato uppercase → `pokemon_id`.
         Serve per gestire nickname custom del giocatore (es. "FIAMMETTA" =
         Charizard) senza dover cambiare nome nel gioco.
 
         Ritorna sempre 6 elementi in ordine visivo (slot 1 = Pokemon attivo).
-        Un elemento con `pokemon_id is None` indica match assente da tutti
-        i canali (nickname non mappato + fuzzy fallito + icona non
-        riconosciuta, o slot vuoto).
+        Un elemento con `pokemon_id is None` indica nickname non mappato e
+        fuzzy fallito, oppure slot vuoto.
         """
         game_area = compute_game_area(frame.width, frame.height, layout)
         results: list[TeamRecognition] = []
-        slot_icons = rois.team_menu.slot_icons
         slot_levels = rois.team_menu.slot_levels
         for index, slot_roi in enumerate(rois.team_menu.slot_areas):
             crop = frame.crop(roi_to_pixels(slot_roi, game_area).as_crop_box())
@@ -215,30 +218,12 @@ class Recognizer:
                     pokemon_id, confidence = matches[0]
                     source = "nickname"
 
-            # Fallback icona se il nome non ha prodotto nulla di affidabile.
-            if pokemon_id is None:
-                icon_crop = frame.crop(roi_to_pixels(slot_icons[index], game_area).as_crop_box())
-                icon_phash = compute_icon_phash(icon_crop)
-                icon_matches = self._repo.find_pokemon_by_sprite_hash(
-                    icon_phash,
-                    generation,
-                    sides=("icon",),
-                    max_distance=icon_max_distance,
-                    limit=1,
-                )
-                if icon_matches:
-                    best = icon_matches[0]
-                    pokemon_id = best.pokemon_id
-                    # Confidenza lineare nella distanza: 0 → 1.0,
-                    # `icon_max_distance` → 0.0. Prima c'era un pavimento a
-                    # 0.5 che faceva sembrare accettabile anche il match
-                    # peggiore ammesso, ed è così che Banette è finito nello
-                    # slot di Charizard. Le distanze osservate sulle icone
-                    # reali stanno fra 16 e 24 anche quando il match è quello
-                    # giusto, quindi con questa scala il canale supera la
-                    # soglia di applicazione solo quando è davvero vicino.
-                    confidence = max(0.0, 1.0 - best.distance / icon_max_distance)
-                    source = "icon"
+            # Qui finiva il fallback pHash sull'icona del menu. La sua
+            # confidenza era `1 - distanza/18` e le distanze reali stavano fra
+            # 16 e 24 anche sul match giusto: 0.11 nel migliore dei casi,
+            # contro la soglia di 0.60 con cui la squadra viene scritta. Non
+            # poteva cambiare nulla, e costava sei pHash a lettura più sei
+            # rettangoli da calibrare per ogni gioco nuovo.
 
             results.append(
                 TeamRecognition(
@@ -258,33 +243,29 @@ class Recognizer:
         layout: GameLayout,
         *,
         name_roi,
-        sprite_roi,
         generation: int,
         restrict_to_ids: set[int] | None = None,
         nickname_map: dict[str, int] | None = None,
     ) -> Recognition | None:
-        """Nucleo condiviso: OCR nome + pHash sprite → combina.
+        """Nucleo condiviso: OCR del riquadro nome → miglior specie.
 
-        `restrict_to_ids`: filtro post-query sui candidati (nome + pHash) per
-        limitare il risultato a un insieme di specie noto (es. i 6 membri
-        della squadra corrente).
+        `restrict_to_ids`: filtro post-query sui candidati, per limitare il
+        risultato a un insieme di specie noto (es. i 6 membri della squadra
+        corrente). Quando c'è, il fuzzy parte da una soglia più bassa e con
+        più candidati: il dominio è piccolo e noto, quindi il miglior match
+        è quasi per forza quello giusto anche con uno score assoluto basso.
 
         `nickname_map`: se il testo OCR corrisponde a un nickname mappato, il
-        match entra in `name_matches` come se venisse dal fuzzy sui nomi, così
-        lo sprite può ancora confermarlo (`source='both'`).
+        match entra in `name_matches` come se venisse dal fuzzy sui nomi.
         """
         game_area = compute_game_area(frame.width, frame.height, layout)
         name_crop = frame.crop(roi_to_pixels(name_roi, game_area).as_crop_box())
-        sprite_crop = frame.crop(roi_to_pixels(sprite_roi, game_area).as_crop_box())
 
-        # Fuzzy match più permissivo quando abbiamo un restrict set: partiamo
-        # con soglia bassa e più candidati, poi filtriamo per il set.
         ocr_results = self._ocr.recognize(name_crop)
         candidate_text = _pick_name_text(ocr_results)
         name_matches: list[tuple[int, float]] = []
         # Stessi tre stadi di `recognize_team`: nickname esatto, fuzzy specie,
-        # fuzzy nickname. Il match nickname viene iniettato in `name_matches`
-        # per non duplicare la politica di fusione di `_combine`.
+        # fuzzy nickname.
         exact_nick = _match_nickname(candidate_text or "", nickname_map, min_similarity=1.0)
         if exact_nick is not None and _id_allowed(exact_nick[0], restrict_to_ids):
             name_matches = [exact_nick]
@@ -306,27 +287,11 @@ class Recognizer:
             name_matches, candidate_text or "", nickname_map, restrict_to_ids
         )
 
-        # Con restrict_to_ids alziamo max_distance e limit per aumentare la
-        # probabilità che almeno un membro squadra sia fra i candidati.
-        phash = compute_phash(sprite_crop)
-        sprite_max_distance = 40 if restrict_to_ids else 30
-        sprite_limit = 30 if restrict_to_ids else 10
-        sprite_matches = self._repo.find_pokemon_by_sprite_hash(
-            phash, generation, max_distance=sprite_max_distance, limit=sprite_limit
-        )
-        sprite_pairs: list[tuple[int, int]] = [
-            (m.pokemon_id, m.distance)
-            for m in sprite_matches
-            if _id_allowed(m.pokemon_id, restrict_to_ids)
-        ]
-
         debug = {
             "ocr_text": candidate_text or "",
-            "phash": phash,
             "restrict_to_ids": sorted(restrict_to_ids) if restrict_to_ids else None,
         }
-
-        return _combine(name_matches, sprite_pairs, debug, restricted=restrict_to_ids is not None)
+        return _best_match(name_matches, debug, restricted=restrict_to_ids is not None)
 
 
 def _fuzzy_species(
@@ -512,97 +477,34 @@ def _extract_level(ocr_lines: list[OcrResult]) -> int | None:
     return None
 
 
-def _combine(
+def _best_match(
     name_matches: list[tuple[int, float]],
-    sprite_matches: list[tuple[int, int]],
     debug: dict,
     *,
     restricted: bool = False,
 ) -> Recognition | None:
-    """Fonde i due elenchi in un unico verdetto con confidenza 0-1.
+    """Sceglie il candidato migliore e ne traduce lo score in confidenza.
 
-    Politica (soglie più permissive quando `restricted=True`, perché il
-    dominio è ristretto a un piccolo set noto — tipicamente i 6 membri
-    della squadra — quindi la migliore corrispondenza è quasi per forza
-    quella giusta anche con score assoluto basso):
+    Con `restricted=True` il dominio è un piccolo insieme noto — tipicamente
+    i sei della squadra — quindi il miglior match è quasi per forza quello
+    giusto e la confidenza ha un pavimento: uno score basso lì dentro dice
+    "l'OCR ha letto male", non "potrebbe essere un altro Pokemon".
 
-    - Pokemon presente in entrambi i top-N → `source='both'`, alta confidenza.
-    - Solo `name_matches`, score ≥ soglia → `source='name'`.
-    - Solo `sprite_matches`, distanza ≤ soglia → `source='sprite'`.
-    - Nessuna soglia raggiunta → miglior name match con confidenza dimezzata.
+    Senza restrizione la confidenza è lo score stesso sopra 0.75, dimezzato
+    sotto: il candidato viene comunque restituito, ma con un numero che
+    `ui.app` confronta con la propria soglia prima di scriverlo da qualche
+    parte.
     """
-    name_map = dict(name_matches)
-    sprite_map = dict(sprite_matches)
-
-    name_threshold = 0.55 if restricted else 0.75
-    sprite_threshold = 20 if restricted else 12
-    confidence_floor = 0.7 if restricted else 0.5
-
-    # Intersezione: pokemon presenti in entrambi.
-    both_ids = set(name_map) & set(sprite_map)
-    if both_ids:
-        pokemon_id = max(
-            both_ids,
-            key=lambda pid: (name_map[pid], -sprite_map[pid]),
-        )
-        name_score = name_map[pokemon_id]
-        distance = sprite_map[pokemon_id]
-        return Recognition(
-            pokemon_id=pokemon_id,
-            confidence=min(1.0, 0.7 + name_score * 0.3),
-            source="both",
-            name_score=name_score,
-            sprite_distance=distance,
-            debug=debug,
-        )
-
-    # Solo nome, se abbastanza sicuro (soglia più bassa quando ristretto).
-    if name_matches:
-        best_id, best_score = max(name_matches, key=lambda pair: pair[1])
-        if best_score >= name_threshold:
-            confidence = max(confidence_floor, best_score) if restricted else best_score
-            return Recognition(
-                pokemon_id=best_id,
-                confidence=confidence,
-                source="name",
-                name_score=best_score,
-                debug=debug,
-            )
-
-    # Solo sprite, con soglia più permissiva se ristretto.
-    if sprite_matches:
-        best_id, best_distance = min(sprite_matches, key=lambda pair: pair[1])
-        if best_distance <= sprite_threshold:
-            base_conf = max(0.0, 1.0 - best_distance / 32.0)
-            confidence = max(confidence_floor, base_conf) if restricted else base_conf
-            return Recognition(
-                pokemon_id=best_id,
-                confidence=confidence,
-                source="sprite",
-                sprite_distance=best_distance,
-                debug=debug,
-            )
-
-    # Fallback: miglior candidato disponibile anche sotto soglia.
-    if name_matches:
-        best_id, best_score = max(name_matches, key=lambda pair: pair[1])
-        confidence = max(confidence_floor, best_score) if restricted else best_score * 0.5
-        return Recognition(
-            pokemon_id=best_id,
-            confidence=confidence,
-            source="name",
-            name_score=best_score,
-            debug=debug,
-        )
-    if restricted and sprite_matches:
-        # Con dominio ristretto, anche uno sprite match "distante" è probabile
-        # sia il giusto (il set contiene un solo candidato plausibile).
-        best_id, best_distance = min(sprite_matches, key=lambda pair: pair[1])
-        return Recognition(
-            pokemon_id=best_id,
-            confidence=confidence_floor,
-            source="sprite",
-            sprite_distance=best_distance,
-            debug=debug,
-        )
-    return None
+    if not name_matches:
+        return None
+    best_id, best_score = max(name_matches, key=lambda pair: pair[1])
+    if restricted:
+        confidence = max(_RESTRICTED_CONFIDENCE_FLOOR, best_score)
+    else:
+        confidence = best_score if best_score >= _NAME_CONFIDENCE_THRESHOLD else best_score * 0.5
+    return Recognition(
+        pokemon_id=best_id,
+        confidence=confidence,
+        name_score=best_score,
+        debug=debug,
+    )

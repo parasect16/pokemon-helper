@@ -1,6 +1,6 @@
 """Macchina a stati che traduce una sequenza di frame in eventi di battaglia.
 
-`is_battle_screen` risponde su un frame isolato; qui teniamo la memoria fra
+`classify_screen` risponde su un frame isolato; qui teniamo la memoria fra
 un frame e l'altro per riconoscere le *transizioni*, che sono ciò che
 interessa a chi deve aggiornare il pannello:
 

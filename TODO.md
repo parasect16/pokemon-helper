@@ -9,14 +9,16 @@ Convenzioni:
 
 ## In corso / parziale
 
-- `[~]` **F3.9 — match icona menu Pokemon**
-  Infra completa: schema `sprite_hashes.side='icon'`, indice Gen 1-5 da
-  `PokeAPI/sprites/versions/generation-{roman}/icons`, preprocessing HSV
-  color-key rimuove bg teal menu FRLG, fallback solo se OCR nome fallisce.
-  **Limite**: distanze pHash/dhash ≥ 16-24 anche su match corretto →
-  inaffidabile. Testato capture live FRLG.
-  Prossimo: template matching diretto su icone note (per game) o pre-crop
-  più aggressivo riquadro icona (rimuovere anche Pokeball sinistra).
+- `[x]` **F3.9 — match icona menu Pokemon: rimosso.**
+  L'infra c'era tutta (schema `sprite_hashes.side='icon'`, indice Gen 1-5,
+  color-key HSV sul teal del menu), ma i numeri non tornavano: confidenza
+  `1 - distanza/18` contro distanze reali 16-24 anche sul match giusto, cioè
+  ≤ 0.11 contro la soglia di 0.60 con cui la squadra viene scritta. Non era
+  inaffidabile, era **inerte**: non poteva cambiare nulla in nessun caso.
+  Tolti il fallback, le 6 ROI `slot_icons` e gli script `icon_debug.py` /
+  `icon_compare.py`. Le righe `side='icon'` restano nel DB (costano solo
+  disco) e `build_sprite_index.py` continua a scriverle: rifare l'indice
+  costa un clone da 500 MB, non vale il risparmio.
 
 - `[x]` **F3.10 — detection livello `L.XX` team menu** (commit `ebc7a58`).
   Risolto senza template matching. `vision/level_reader.py` binarizza,
@@ -60,25 +62,93 @@ Convenzioni:
 
 ## Da fare — polish / feature
 
-- `[x]` **ROI `player_sprite` e `player_hp_bar`** ricalibrate misurando i
-  pixel su cattura 1119x734, non a occhio. `player_hp_bar` stava sui numeri
-  PS (y nativa 95-99) invece che sulla barra (90-95). `player_sprite`
-  arrivava a y nativa 124, dentro il box messaggi che comincia a 112, e
-  partiva 30 px a sinistra dello sprite: ora è lo slot 64x64 in cui la Gen 3
-  disegna gli sprite posteriori (x 40-104, y 48-112), la stessa inquadratura
-  delle reference indicizzate.
+- `[x]` **ROI `player_sprite`** ricalibrata misurando i pixel su cattura
+  1119x734, non a occhio: arrivava a y nativa 124, dentro il box messaggi che
+  comincia a 112, e partiva 30 px a sinistra dello sprite. Ora è lo slot 64x64
+  in cui la Gen 3 disegna gli sprite posteriori (x 40-104, y 48-112), la
+  stessa inquadratura delle reference indicizzate.
+  `player_hp_bar` era stata ricalibrata nella stessa tornata ed è poi stata
+  **rimossa**: nessun codice la leggeva, solo l'overlay diagnostico la
+  disegnava. Era un rettangolo da tarare per ogni gioco nuovo, a vuoto.
 
-- `[!]` **pHash sprite inutilizzabile in battaglia**. La cattura ha campo e
-  cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la
-  specie corretta non entra nei primi 3 a nessun offset di ROI (Weezing a
-  distanza 20-24 mentre specie sbagliate stanno a 14-16). Il verdetto regge
-  interamente sul nome. Per recuperare il canale servirebbe segmentare il
-  soggetto dallo sfondo prima del hash (il fondo di battaglia è a bande di
-  colore piatte, quindi un flood-fill dai bordi è plausibile).
+- `[x]` **pHash sprite in battaglia: rimosso.** La cattura ha campo e cielo
+  dietro il Pokemon, le reference indicizzate stanno su bianco: la specie
+  corretta non entrava nei primi 3 a nessun offset di ROI (Weezing a distanza
+  20-24 mentre specie sbagliate stanno a 14-16). Lato avversario la soglia 12
+  non veniva mai raggiunta, quindi era solo costo. Lato giocatore era peggio:
+  col match ristretto ai 6 di squadra, a OCR muta `_combine` cadeva sul ramo
+  solo-sprite e ritornava la **distanza minima** con confidenza 0.70, sopra la
+  soglia di applicazione — cioè evidenziava con sicurezza lo slot sbagliato.
+  Tolte anche le ROI `opponent_sprite` e `player_sprite`.
+  Per recuperare il canale servirebbe segmentare il soggetto dallo sfondo
+  prima del hash (il fondo di battaglia è a bande di colore piatte, quindi un
+  flood-fill dai bordi è plausibile), e rifare le due ROI.
+  Nota: `PokemonRepository.find_pokemon_by_sprite_hash` è rimasta senza
+  chiamanti di produzione. Tenuta apposta — è la query che servirebbe al
+  ritorno del canale, ed è coperta dai test di `data/`.
 
-- `[ ]` **Calibratore ROI visuale** (~4-6h). Dialog con canvas su screenshot,
-  utente disegna rettangoli per (nome opp, sprite opp, HUD player, ecc.).
-  Sblocca giochi non supportati senza toccare codice.
+- `[ ]` **PS del giocatore via OCR** (idea, non pianificata). Oggi nessun
+  valore PS viene letto: `opponent_hp_bar` serve solo a `screen_mode` per
+  riconoscere la schermata di combattimento, e la ROI `player_hp_bar` è stata
+  rimossa perché non aveva nessun consumatore. Se un giorno servono i PS,
+  leggere i **numeri** ("112/112") con l'OCR e non la lunghezza della barra:
+  la barra dà una frazione approssimata e va tarata sui colori di ogni gioco,
+  i numeri danno il valore esatto con lo stesso motore già in uso. Solo lato
+  giocatore — di quelli avversari il gioco non mostra le cifre. Serve una ROI
+  nuova sui numeri PS dell'HUD (y nativa 95-99 in FRLG, misurata quando
+  `player_hp_bar` ci cadeva sopra per errore).
+
+- `[x]` **Calibratore ROI visuale** (16 rettangoli da disegnare).
+  Dialog con canvas su screenshot, utente disegna i rettangoli. Sblocca giochi
+  non supportati senza toccare codice.
+  - `[x]` **1.1 persistenza** — `vision/roi_store.py`: JSON per gioco in
+    `%APPDATA%\pokemon-helper
+ois\<gioco>.json`, `RoiStore` load/save/clear,
+    `resolve_rois(game)` = default del repo + override utente. Lettura
+    tutto-o-niente: un file rotto o con un rettangolo fuori range torna ai
+    default con un avviso, perché applicarne metà darebbe ROI che non sono né
+    quelle dell'utente né quelle del repo. 25 test.
+  - `[x]` **1.2 chiamanti** — `ui.app` e gli otto script di debug passano da
+    `resolve_rois` invece di leggere `GAME_ROIS`. In `app` il risultato è in
+    cache per sessione: il poll F4 gira due volte al secondo e non deve
+    rileggere il disco a ogni giro (il calibratore invaliderà la cache).
+  - `[x]` **1.3 dialog di disegno** — `ui/roi_calibrator.py` (canvas +
+    dialogo) e `vision/roi_targets.py` (i 16 bersagli, puri). Rubber-band con
+    snap alla griglia nativa, frecce per spostare di un pixel nativo,
+    Shift+frecce per ridimensionare, zoom 50-400% con apertura già adattata.
+    Coordinate mostrate in pixel nativi, non del frame: sono le uniche
+    confrontabili con uno screenshot e con `roi.py`.
+  - `[x]` **1.4 cattura per gruppo** — pulsante "Cattura la schermata a
+    video" e riga di stato che dice cosa c'è a schermo, con ⚠ quando il
+    bersaglio selezionato si misura sull'altra schermata. La cattura arriva
+    come `frame_source` iniettata (`CalibrationFrame`: immagine + layout +
+    schermata), così il dialogo resta costruibile senza emulatore e senza gli
+    extra `[vision]`; una cattura fallita si scrive nella riga di stato e
+    lascia a schermo il frame precedente.
+  - `[x]` **1.5 read-back dal vivo** — anteprima del ritaglio ingrandita a
+    interpolazione nulla + `vision/roi_probe.py`, che descrive cosa c'è dentro
+    in base al tipo di bersaglio: OCR per i box di testo, `read_level` cifra
+    per cifra per i livelli, conteggio dei pixel colore-PS per la barra
+    (l'unico bersaglio senza testo, e non gli si spende un'inferenza ONNX).
+    Verificato sulle catture live: ROI buona → `testo: "HEEZINGL.33" a 1.00`,
+    la stessa spostata di 20 px nativi → `nessun testo letto`. È esattamente
+    il bug di F3.18, che a occhio non si vedeva.
+  - `[x]` **1.6 ripristina / esporta** — "Ripristina tutti" accanto al
+    ripristino del singolo rettangolo, e "Copia snippet per roi.py" che mette
+    negli appunti il literal `GameRois(...)` con tre decimali e i commenti
+    per slot, così una calibrazione buona diventa il default del repo invece
+    di restare su una macchina. Un test esegue lo snippet con `exec` e
+    confronta le ROI ricostruite: se un giorno smettesse di essere Python
+    valido, si saprebbe. Il **salvataggio** su `RoiStore` resta al chiamante
+    (1.7), come già fa `NicknameDialog`: il dialogo non conosce il disco.
+  - `[x]` **1.7 aggancio UI** — pulsante `▣` in `TeamPanel`, dialogo aperto
+    sul gioco della generazione corrente. La cattura per il calibratore passa
+    dal worker (apartment COM) e il risultato torna alla GUI da una coda: si
+    blocca il thread GUI per ~50 ms, e solo su pressione di un pulsante.
+    L'auto-detect viene sospeso mentre il dialogo è aperto, altrimenti i suoi
+    poll si accodano davanti alla "Cattura". All'OK si salva su `RoiStore` e
+    si invalida la cache delle ROI risolte, o la calibrazione appena fatta
+    non varrebbe fino al riavvio.
 - `[ ]` **Supporto Pokemon Cristallo** (Gen 2 mGBA). Nuove ROI, layout GB/GBC
   (160×144, aspect 10:9), aggiungere `LAYOUT_MGBA_GB` in `_GAME_BY_GENERATION`.
 - `[x]` **Test UI** con `pytest-qt`. Coverage `ui/` da 0 a 65%: pannelli,
@@ -87,9 +157,17 @@ Convenzioni:
   intera) e `hotkey.py` (pynput). Un bug trovato scrivendoli: aprendo `…` su
   uno slot già assegnato la ricerca era pre-compilata ma la lista no, e un OK
   immediato riassegnava lo slot al primo Pokemon dell'elenco.
-- `[ ]` **Screen mode detection formale**: euristica attuale (≥3 slot
-  OCR-leggibili) può fallire. Meglio: OCR di elemento unico del menu (es.
-  pulsante "ESCI" bottom-right) come sentinella.
+- `[x]` **Screen mode detection formale**. `vision/screen_mode.py` (ex
+  `battle_detector`) ha un'unica porta d'ingresso, `classify_screen`, che
+  ritorna `BATTLE` / `PARTY_MENU` / `OTHER` più il motivo per il tooltip.
+  La sentinella è il pulsante `ESCI` in basso a destra dell'elenco Pokemon:
+  ROI misurata per colore su due catture live di dimensioni diverse, che
+  danno lo stesso rettangolo normalizzato a meno di 0.001. OCR: `ESCI` a
+  0.98 sul menu, spazzatura dal box messaggi sui frame di battaglia.
+  Costa un'OCR, quindi è opt-in (`ocr=`): il poll F4 gira due volte al
+  secondo e si ferma al colore. L'euristica ≥3 slot resta come seconda
+  linea — guarda cosa è stato letto, non un rettangolo, e fallisce per
+  cause diverse.
 
 - `[x]` **Nickname map utente** (commit 13dd606): dialog 🏷 per associare
   nickname → species, salvato in `state.json`. Team recognize usa mappa
@@ -118,9 +196,9 @@ Convenzioni:
 - `[ ]` **Verifica ROI battaglia + team menu su risoluzione emulatore
   odierna**. Utente disegnerà a colori 3 aree per capture di riferimento
   (nome/pokemon/livello), poi confronto con `ROIS_FIRERED`. Serve:
-  - definire 3 colori distinti + visibili (proposta: `#FF00FF` magenta
-    per nome, `#00FFFF` ciano per sprite/icona, `#FFFF00` giallo per
-    livello);
+  - definire 2 colori distinti + visibili (`#FF00FF` magenta per nome,
+    `#FFFF00` giallo per livello; il ciano delle icone è decaduto con il
+    fallback pHash);
   - script snap che accetta un PNG annotato dall'utente ed estrae
     bounding box per colore → normalizza in coord `Roi` (0..1 su game
     area);
@@ -131,9 +209,14 @@ Convenzioni:
 - `[ ]` `data/*.png` gitignored ma alcuni script scrivono altri file
   (`data/capture-test.png`, `data/team-menu-slot-*.png`). Se compaiono altri
   artefatti da script debug, aggiungere pattern.
-- `[ ]` Chiusura app durante recognize (raro): worker persistente può non
-  terminare pulito. `_HotkeyGroup.stop` chiama `worker.stop()` ma job in corso
-  continua fino a fine. Aggiungere check cancel/timeout.
+- `[x]` Chiusura app durante recognize. `_RecognizeWorker.stop()` ora svuota
+  la coda, rifiuta le submit successive, espone `cancelled` (controllato dai
+  job di recognize e dal poll fra una fase e l'altra) e aspetta il thread con
+  timeout, stampando se scade. La cattura si chiude **prima** del worker: la
+  sua `close()` sblocca subito una `capture_frame` in attesa invece di
+  lasciarla scadere a 3 s. Perché regga, `close()` è diventata definitiva —
+  prima era indistinguibile dalla sessione che muore con l'emulatore, caso
+  che riapre apposta, quindi un job in volo ne avviava una nuova uscendo.
 
 ## Note libere
 

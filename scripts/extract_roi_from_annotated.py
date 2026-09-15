@@ -1,11 +1,13 @@
 """Estrae ROI dal PNG annotato a mano dall'utente.
 
 L'immagine di input è uno screenshot client-area dell'emulatore su cui
-l'utente ha disegnato rettangoli di tre colori distinti:
+l'utente ha disegnato rettangoli di due colori distinti:
 
 - **magenta** `(255,   0, 255)` = riquadro nome Pokemon
-- **ciano**   `(  0, 255, 255)` = icona Pokemon (mini sprite menu)
 - **giallo**  `(255, 255,   0)` = riquadro livello `L.XX`
+
+C'era anche il ciano per le icone del menu, tolto insieme al fallback pHash
+che le consumava.
 
 Il flusso:
 
@@ -52,7 +54,6 @@ from pokemon_helper.vision.roi import (  # noqa: E402
 # Colori target: (nome_semantico, RGB, etichetta_italiana).
 COLORS: dict[str, tuple[tuple[int, int, int], str]] = {
     "name": ((255, 0, 255), "magenta"),
-    "icon": ((0, 255, 255), "ciano"),
     "level": ((255, 255, 0), "giallo"),
 }
 
@@ -244,7 +245,7 @@ def main() -> None:
             f"aspect={game_area.w / game_area.h:.3f}\n"
         )
     else:
-        layout = GameLayout(aspect_ratio=240 / 160, menu_offset_top=args.menu_offset)
+        layout = GameLayout(native_width=240, native_height=160, menu_offset_top=args.menu_offset)
         game_area = compute_game_area(img.width, img.height, layout)
         print(
             f"game area (computed): "
@@ -253,7 +254,6 @@ def main() -> None:
 
     current: dict[str, tuple[Roi, ...]] = {
         "name": ROIS_FIRERED.team_menu.slot_areas,
-        "icon": ROIS_FIRERED.team_menu.slot_icons,
         "level": ROIS_FIRERED.team_menu.slot_levels,
     }
 
@@ -285,14 +285,13 @@ def main() -> None:
         print()
 
     # Blocco copy-paste pronto per `roi.py`.
-    if len(extracted) == 3:
+    if len(extracted) == len(COLORS):
         print("=" * 72)
         print("Snippet pronto per src/pokemon_helper/vision/roi.py (team_menu):")
         print("=" * 72)
         print("team_menu=TeamMenuRois(")
         groups = (
             ("name", "slot_areas"),
-            ("icon", "slot_icons"),
             ("level", "slot_levels"),
         )
         for group, label in groups:

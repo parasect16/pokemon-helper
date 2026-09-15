@@ -21,6 +21,7 @@ from PIL import ImageDraw
 from pokemon_helper.vision.capture import CaptureError, WindowCapture
 from pokemon_helper.vision.chrome import detect_chrome_height, resolve_layout
 from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
+from pokemon_helper.vision.roi_store import resolve_rois
 
 
 def main() -> int:
@@ -32,7 +33,7 @@ def main() -> int:
         )
         return 2
 
-    layout, rois = GAME_ROIS[game]
+    layout, rois = resolve_rois(game)
 
     capture = WindowCapture("mGBA")
     try:
@@ -70,11 +71,9 @@ def main() -> int:
 
     labels = (
         ("opp-name", rois.opponent_name, "yellow"),
-        ("opp-sprite", rois.opponent_sprite, "red"),
         ("opp-hp", rois.opponent_hp_bar, "cyan"),
         ("player-name", rois.player_name, "orange"),
-        ("player-sprite", rois.player_sprite, "magenta"),
-        ("player-hp", rois.player_hp_bar, "blue"),
+        ("party-exit", rois.party_menu_sentinel, "magenta"),
     )
     for label, roi, color in labels:
         rect = roi_to_pixels(roi, game_area)

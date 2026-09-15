@@ -9,6 +9,7 @@ dipendenze `[vision]`.
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -18,8 +19,9 @@ from pokemon_helper.ui.app import _BattlePoller, _HotkeyGroup, _RecognizeWorker
 class _InlineWorker:
     """Worker che esegue subito: il poll finisce prima del tick successivo."""
 
-    def __init__(self) -> None:
+    def __init__(self, cancelled: bool = False) -> None:
         self.submitted = 0
+        self.cancelled = cancelled
 
     def submit(self, job) -> None:
         self.submitted += 1
@@ -31,6 +33,7 @@ class _QueueingWorker:
 
     def __init__(self) -> None:
         self.jobs: list = []
+        self.cancelled = False
 
     def submit(self, job) -> None:
         self.jobs.append(job)
@@ -211,9 +214,80 @@ def test_a_job_that_raises_does_not_kill_the_worker(capsys) -> None:
 
 def test_stopping_the_worker_ends_its_thread() -> None:
     worker = _RecognizeWorker()
-    worker.stop()
-    worker._thread.join(timeout=5)
+    assert worker.stop() is True
     assert not worker._thread.is_alive()
+
+
+def test_the_worker_is_not_cancelled_until_it_is_stopped() -> None:
+    worker = _RecognizeWorker()
+    assert worker.cancelled is False
+    worker.stop()
+    assert worker.cancelled is True
+
+
+def test_jobs_submitted_after_the_stop_are_ignored() -> None:
+    """In chiusura non c'è più nessuno a cui consegnare il risultato."""
+    worker = _RecognizeWorker()
+    worker.stop()
+
+    ran = threading.Event()
+    worker.submit(ran.set)
+
+    assert not ran.wait(0.2)
+
+
+def test_jobs_still_queued_when_the_stop_arrives_never_run() -> None:
+    """La coda viene svuotata: quello che non è partito non deve partire."""
+    worker = _RecognizeWorker()
+    started = threading.Event()
+    skipped = threading.Event()
+
+    def blocking() -> None:
+        """Occupa il worker finché non comincia la chiusura, come un recognize."""
+        started.set()
+        while not worker.cancelled:
+            time.sleep(0.005)
+
+    worker.submit(blocking)
+    assert started.wait(5)
+    worker.submit(skipped.set)  # accodato dietro a quello in corso
+
+    assert worker.stop() is True
+    assert not skipped.is_set()
+
+
+def test_a_job_hanging_past_the_timeout_is_reported_and_abandoned(capsys) -> None:
+    """Il thread è daemon: non potendolo uccidere, almeno lo si dice."""
+    worker = _RecognizeWorker()
+    started = threading.Event()
+    release = threading.Event()
+
+    def hanging() -> None:
+        started.set()
+        release.wait(10)
+
+    worker.submit(hanging)
+    assert started.wait(5)
+    try:
+        assert worker.stop(timeout=0.2) is False
+        assert "ancora in corso" in capsys.readouterr().out
+    finally:
+        release.set()
+
+
+def test_a_cancelled_worker_skips_the_poll_entirely(qapp) -> None:
+    """Il tick può arrivare a chiusura iniziata: non deve toccare la cattura."""
+    probed: list[int] = []
+    poller = _poller(
+        _InlineWorker(cancelled=True),
+        _FakeWatcher(),
+        probe=lambda: (probed.append(1), (True, None))[1],
+    )
+
+    poller._tick()
+
+    assert probed == []
+    assert not poller._busy.is_set()  # il tick successivo può ripartire
 
 
 # ------------------------------------------------------------ _HotkeyGroup

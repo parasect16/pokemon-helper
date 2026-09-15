@@ -149,7 +149,7 @@ def test_resolve_layout_keeps_the_declared_offset_when_the_measure_fails() -> No
 
 
 def test_resolve_layout_returns_the_same_layout_when_they_agree() -> None:
-    layout = GameLayout(aspect_ratio=240 / 160, menu_offset_top=52)
+    layout = GameLayout(native_width=240, native_height=160, menu_offset_top=52)
     assert resolve_layout(_frame(title_h=30, menu_h=22), layout) is layout
 
 
