@@ -5,15 +5,14 @@ Uso:
 
 Cattura mGBA (menu Pokemon aperto) e per ogni slot:
 
-- ritaglia le tre ROI: `slot_areas` (nome), `slot_icons` (icona), `slot_levels`
-  (livello);
-- salva i crop come `data/team-slot-N-{name,icon,level}.png`;
+- ritaglia le due ROI: `slot_areas` (nome) e `slot_levels` (livello);
+- salva i crop come `data/team-slot-N-{name,level}.png`;
 - esegue OCR sul crop nome e sul crop livello (con `high_contrast=True` +
   `upscale=4` come nel recognizer reale);
 - esegue `recognize_team` completo e stampa il verdetto per slot.
 
-Overlay unico `data/team-menu-overlay.png` disegna tutte e 3 le ROI per
-slot in colori distinti (magenta=nome, ciano=icona, giallo=livello) —
+Overlay unico `data/team-menu-overlay.png` disegna entrambe le ROI per
+slot in colori distinti (magenta=nome, giallo=livello) —
 comodo per vedere a colpo d'occhio se le ROI sono allineate al capture
 reale con la risoluzione corrente dell'emulatore.
 """
@@ -45,7 +44,6 @@ GAME_GENERATION = {"firered": 3}
 
 # Colori overlay (RGB): allineati al PNG annotato dell'utente per confronto.
 COLOR_NAME = "magenta"
-COLOR_ICON = "cyan"
 COLOR_LEVEL = "yellow"
 
 
@@ -99,24 +97,19 @@ def main() -> int:
     tm = rois.team_menu
     for i in range(len(tm.slot_areas)):
         name_rect = roi_to_pixels(tm.slot_areas[i], ga)
-        icon_rect = roi_to_pixels(tm.slot_icons[i], ga)
         level_rect = roi_to_pixels(tm.slot_levels[i], ga)
 
         name_crop = frame.image.crop(name_rect.as_crop_box())
-        icon_crop = frame.image.crop(icon_rect.as_crop_box())
         level_crop = frame.image.crop(level_rect.as_crop_box())
 
         name_crop.save(OUT_DIR / f"team-slot-{i}-name.png")
-        icon_crop.save(OUT_DIR / f"team-slot-{i}-icon.png")
         level_crop.save(OUT_DIR / f"team-slot-{i}-level.png")
 
         _draw_rect(draw, name_rect, COLOR_NAME)
-        _draw_rect(draw, icon_rect, COLOR_ICON)
         _draw_rect(draw, level_rect, COLOR_LEVEL)
 
         print(f"[slot {i}]")
         print(f"    name  rect=({name_rect.x},{name_rect.y}, {name_rect.w}x{name_rect.h})")
-        print(f"    icon  rect=({icon_rect.x},{icon_rect.y}, {icon_rect.w}x{icon_rect.h})")
         print(f"    level rect=({level_rect.x},{level_rect.y}, {level_rect.w}x{level_rect.h})")
         _dump_ocr(ocr, name_crop, "OCR name ")
         _dump_ocr(ocr, level_crop, "OCR level", upscale=4, high_contrast=True)

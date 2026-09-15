@@ -1,11 +1,10 @@
-"""Debug: cattura battaglia + isola crop del player + OCR/pHash + top match.
+"""Debug: cattura battaglia + isola il crop del nome player + OCR + verdetto.
 
 Uso: mGBA in combattimento → esegui questo script.
 
 Salva:
     data/player-crop-name.png
-    data/player-crop-sprite.png
-    data/player-overlay.png       frame con ROI evidenziate
+    data/player-overlay.png       frame con la ROI evidenziata
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from pokemon_helper.vision.capture import WindowCapture
 from pokemon_helper.vision.ocr import OcrEngine
 from pokemon_helper.vision.recognizer import Recognizer
 from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
-from pokemon_helper.vision.sprite_hash import compute_phash
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "pokemon.sqlite"
@@ -37,13 +35,9 @@ def main() -> int:
     print(f"[frame] {frame.width}x{frame.height} game_area=({ga.x},{ga.y},{ga.w}x{ga.h})")
 
     name_rect = roi_to_pixels(rois.player_name, ga)
-    sprite_rect = roi_to_pixels(rois.player_sprite, ga)
     name_crop = frame.image.crop(name_rect.as_crop_box())
-    sprite_crop = frame.image.crop(sprite_rect.as_crop_box())
     name_crop.save(PROJECT_ROOT / "data" / "player-crop-name.png")
-    sprite_crop.save(PROJECT_ROOT / "data" / "player-crop-sprite.png")
     print(f"[name-roi] {name_rect.w}x{name_rect.h} @ ({name_rect.x},{name_rect.y})")
-    print(f"[sprite-roi] {sprite_rect.w}x{sprite_rect.h} @ ({sprite_rect.x},{sprite_rect.y})")
 
     overlay = frame.image.copy()
     draw = ImageDraw.Draw(overlay)
@@ -52,24 +46,11 @@ def main() -> int:
         outline="orange",
         width=2,
     )
-    draw.rectangle(
-        (
-            sprite_rect.x,
-            sprite_rect.y,
-            sprite_rect.x + sprite_rect.w,
-            sprite_rect.y + sprite_rect.h,
-        ),
-        outline="magenta",
-        width=2,
-    )
     overlay.save(PROJECT_ROOT / "data" / "player-overlay.png")
 
     ocr = OcrEngine()
     ocr_lines = ocr.recognize(name_crop)
     print(f"[ocr-name] {[(r.text, round(r.confidence, 2)) for r in ocr_lines]}")
-
-    phash = compute_phash(sprite_crop)
-    print(f"[phash-sprite] {phash}")
 
     # Simula il vincolo "player in campo = uno dei 6 di squadra" leggendo
     # lo stato persistito. Se non c'è team salvato, fa recognize sull'intero
@@ -98,22 +79,9 @@ def main() -> int:
             print(
                 f"[recognize-player] id={result.pokemon_id} "
                 f"({p.name_it if p else '?'}) "
-                f"src={result.source} conf={result.confidence:.2f} "
-                f"name_score={result.name_score} sprite_dist={result.sprite_distance}"
+                f"conf={result.confidence:.2f} name_score={result.name_score:.2f}"
             )
             print(f"  debug={result.debug}")
-
-        # Aggiungo anche top-10 pHash match per capire dove finisce il sprite
-        matches = repo.find_pokemon_by_sprite_hash(
-            phash, 3, sides=("front", "back"), max_distance=64, limit=10
-        )
-        print("[phash top-10]")
-        for m in matches:
-            p = repo.get_by_id(m.pokemon_id)
-            print(
-                f"  id={m.pokemon_id} {p.name_en if p else '?':<15} "
-                f"dist={m.distance} side={m.side} game={m.game}"
-            )
     return 0
 
 

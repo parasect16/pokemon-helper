@@ -1,4 +1,4 @@
-"""Cattura mGBA + OCR + pHash → identifica Pokemon avversario.
+"""Cattura mGBA + OCR del riquadro nome → identifica Pokemon avversario.
 
 Uso:
     python scripts/recognize_test.py [game]
@@ -59,11 +59,7 @@ def main() -> int:
         pokemon = repo.get_by_id(result.pokemon_id)
         name = pokemon.name_it if pokemon else f"#{result.pokemon_id}"
         print(f"[recognized] {name} (id={result.pokemon_id})")
-        print(f"  source={result.source} confidence={result.confidence:.2f}")
-        if result.name_score is not None:
-            print(f"  name_score={result.name_score:.2f}")
-        if result.sprite_distance is not None:
-            print(f"  sprite_distance={result.sprite_distance}")
+        print(f"  confidence={result.confidence:.2f} name_score={result.name_score:.2f}")
         print(f"  debug={result.debug}")
     return 0
 

@@ -82,8 +82,8 @@ LAYOUT_MGBA_GB = GameLayout(aspect_ratio=160 / 144, menu_offset_top=52)
 # discrepanze visive nel debug.
 #
 # Layout schermo battaglia Rosso Fuoco (GBA 240×160):
-#   - Avversario in alto: barra nome+HP in alto-sx, sprite in alto-dx.
-#   - Giocatore in basso: barra nome+HP in basso-dx, sprite in basso-sx.
+#   - Avversario in alto: barra nome+HP in alto-sx.
+#   - Giocatore in basso: barra nome+HP in basso-dx.
 TEAM_SIZE = 6
 
 
@@ -94,21 +94,23 @@ class TeamMenuRois:
     - `slot_areas`: 6 rettangoli tight sul solo nome di ciascun slot. Fino
       alla ricalibrazione F3.14 coprivano anche la riga del livello; ora no,
       e `slot_levels` è l'unica sorgente per il numero.
-    - `slot_icons`: 6 rettangoli sulle mini icone del menu (fallback quando
-      l'OCR nome non trova match — es. nickname personalizzati).
     - `slot_levels`: 6 rettangoli tight sul solo indicatore di livello
       ("L.XX"). Un'OCR dedicata su un crop piccolo migliora molto la
       detection del numero rispetto a leggere l'intera area slot.
+
+    C'era anche `slot_icons`, 6 rettangoli sulle mini icone del menu, per un
+    fallback pHash quando l'OCR del nome non trovava match. Rimosso: la
+    confidenza di quel canale è `1 - distanza/18` e le distanze reali stavano
+    fra 16 e 24 anche sul match giusto, cioè sempre sotto la soglia di 0.60
+    con cui la squadra viene scritta. Non era inaffidabile, era inerte.
     """
 
     slot_areas: tuple[Roi, ...]
-    slot_icons: tuple[Roi, ...]
     slot_levels: tuple[Roi, ...]
 
     def __post_init__(self) -> None:
         for name, coll in (
             ("slot_areas", self.slot_areas),
-            ("slot_icons", self.slot_icons),
             ("slot_levels", self.slot_levels),
         ):
             if len(coll) != TEAM_SIZE:
@@ -117,17 +119,24 @@ class TeamMenuRois:
 
 @dataclass(frozen=True, slots=True)
 class GameRois:
-    """Insieme di ROI per un gioco (avversario + giocatore + menu squadra)."""
+    """Insieme di ROI per un gioco (avversario + giocatore + menu squadra).
+
+    Non ci sono ROI sugli sprite. Il pHash in combattimento è stato tolto: la
+    cattura ha campo e cielo dietro il Pokemon mentre le reference indicizzate
+    stanno su bianco, quindi la specie giusta non entrava nei primi tre a
+    nessun offset di ROI, e sul lato giocatore il ramo solo-sprite arrivava
+    perfino a decidere da solo quando l'OCR non leggeva nulla. Il verdetto sta
+    tutto sul nome. Se un giorno si segmenta il soggetto dallo sfondo prima di
+    hashare (vedi TODO), le ROI sprite tornano — ma insieme al resto.
+    """
 
     opponent_name: Roi
-    opponent_sprite: Roi
     # Non è una lettura di HP: `vision.screen_mode` ci conta i pixel dei colori
     # della barra per decidere se il frame è una schermata di combattimento. È
     # l'unico elemento presente su ogni schermata di battaglia e su nessun'altra.
     # Nessun valore PS viene mai letto, né da qui né altrove.
     opponent_hp_bar: Roi
     player_name: Roi
-    player_sprite: Roi
     # Pulsante in basso a destra dell'elenco Pokemon, usato da
     # `vision.screen_mode` come sentinella testuale della schermata.
     party_menu_sentinel: Roi
@@ -152,9 +161,6 @@ ROIS_FIRERED = GameRois(
     # `h` allargato da 0.057 a 0.065: con il box stretto l'OCR leggeva
     # "HEEZIHGL.33" (0.97), con questo "HEEZINGL.33" (1.00).
     opponent_name=Roi(x=0.016, y=0.129, w=0.407, h=0.065),
-    # Sprite avversario: metà alta destra. pHash è tollerante alle inclusioni
-    # di sfondo, quindi il crop non deve essere perfettamente stretto.
-    opponent_sprite=Roi(x=0.469, y=0.060, w=0.423, h=0.359),
     # Barra HP avversario: barra colorata dopo la label "PS". Serve a
     # `screen_mode` per riconoscere la schermata, non a leggere gli HP.
     opponent_hp_bar=Roi(x=0.135, y=0.198, w=0.258, h=0.029),
@@ -163,17 +169,6 @@ ROIS_FIRERED = GameRois(
     # HP che vive più in basso). Box alto, quindi tollerava lo sfasamento del
     # chrome anche prima di questa correzione.
     player_name=Roi(x=0.546, y=0.462, w=0.412, h=0.085),
-    # Sprite posteriore del giocatore in basso-sinistra. Ricalibrato su cattura
-    # 1119x734 misurando i pixel dello sprite: il box precedente arrivava a
-    # y nativa 124, cioè dentro il box messaggi (che comincia a 112), e
-    # partiva 30 px nativi a sinistra dello sprite.
-    #
-    # Questo è lo slot 64x64 nativo in cui la Gen 3 disegna gli sprite
-    # posteriori, ancorato in basso al bordo del campo: x 40-104, y 48-112.
-    # Prenderlo intero invece di ritagliare il singolo Pokemon è voluto — le
-    # reference indicizzate sono anch'esse 64x64, quindi crop e reference
-    # hanno la stessa inquadratura.
-    player_sprite=Roi(x=0.167, y=0.300, w=0.267, h=0.400),
     # --- Menu Pokemon ---
     # Pulsante "ESCI", la pillola viola in basso a destra dell'elenco. Box
     # misurato per colore (il viola del pulsante, escluso il pokeball a
@@ -186,7 +181,7 @@ ROIS_FIRERED = GameRois(
     # righe compatte a destra. `slot_areas` è tight sul nome, `slot_levels`
     # sul solo "L.XX": i due box non si sovrappongono.
     # Coord estratte via `scripts/extract_roi_from_annotated.py` da immagine
-    # annotata a mano dall'utente (magenta=nome, ciano=icona, giallo=livello).
+    # annotata a mano dall'utente (magenta=nome, giallo=livello).
     team_menu=TeamMenuRois(
         slot_areas=(
             Roi(x=0.126, y=0.225, w=0.193, h=0.069),  # slot 0 (attivo, box sx)
@@ -195,14 +190,6 @@ ROIS_FIRERED = GameRois(
             Roi(x=0.489, y=0.389, w=0.216, h=0.050),
             Roi(x=0.489, y=0.540, w=0.216, h=0.050),
             Roi(x=0.486, y=0.690, w=0.217, h=0.050),  # slot 5
-        ),
-        slot_icons=(
-            Roi(x=0.014, y=0.215, w=0.105, h=0.126),  # slot 0 (attivo)
-            Roi(x=0.354, y=0.063, w=0.122, h=0.134),  # slot 1
-            Roi(x=0.354, y=0.215, w=0.124, h=0.134),
-            Roi(x=0.356, y=0.369, w=0.126, h=0.134),
-            Roi(x=0.356, y=0.516, w=0.126, h=0.134),
-            Roi(x=0.352, y=0.669, w=0.126, h=0.134),  # slot 5
         ),
         slot_levels=(
             Roi(x=0.197, y=0.299, w=0.062, h=0.045),  # slot 0 (attivo)

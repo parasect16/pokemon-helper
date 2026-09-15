@@ -126,5 +126,7 @@ def test_game_rois_registry_contains_firered() -> None:
     layout, rois = GAME_ROIS["firered"]
     assert layout.aspect_ratio == pytest.approx(240 / 160)
     assert rois.opponent_name.w > 0
-    assert rois.opponent_sprite.w > 0
     assert rois.opponent_hp_bar.w > 0
+    assert rois.player_name.w > 0
+    assert rois.party_menu_sentinel.w > 0
+    assert len(rois.team_menu.slot_areas) == len(rois.team_menu.slot_levels) == 6

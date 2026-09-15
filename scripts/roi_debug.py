@@ -70,10 +70,9 @@ def main() -> int:
 
     labels = (
         ("opp-name", rois.opponent_name, "yellow"),
-        ("opp-sprite", rois.opponent_sprite, "red"),
         ("opp-hp", rois.opponent_hp_bar, "cyan"),
         ("player-name", rois.player_name, "orange"),
-        ("player-sprite", rois.player_sprite, "magenta"),
+        ("party-exit", rois.party_menu_sentinel, "magenta"),
     )
     for label, roi, color in labels:
         rect = roi_to_pixels(roi, game_area)

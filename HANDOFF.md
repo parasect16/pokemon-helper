@@ -9,7 +9,7 @@ Vedi [`PLAN.md`](PLAN.md) per roadmap, [`CLAUDE.md`](CLAUDE.md) per convenzioni.
 Tool desktop Windows. Affianca emulatore Pokemon Gen 1-5 con pannello sempre in primo piano. Funzionalità:
 
 - **Squadra manuale**: 6 slot nome + livello, generazione selezionabile. Persistenza in `%APPDATA%\pokemon-helper\state.json`.
-- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR nome (il canale pHash sprite esiste ma in battaglia è inservibile, vedi §6), in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione). Guardia `classify_screen` blocca l'update se la schermata non è quella di combattimento — la ROI HP avversario senza pixel colore-HP (warning ⚠, motivo in tooltip).
+- **Riconoscimento battaglia** (`Ctrl+Alt+R` o pulsante `⚔ Avversario`) su mGBA + Rosso Fuoco: cattura finestra, riconosce avversario via OCR del nome — unico canale, il pHash degli sprite è stato tolto (vedi §6) — e in parallelo Pokemon giocatore in campo (vincolato ai 6 membri squadra per precisione). Guardia `classify_screen` blocca l'update se la schermata non è quella di combattimento — la ROI HP avversario senza pixel colore-HP (warning ⚠, motivo in tooltip).
 - **Riconoscimento squadra** (`Ctrl+Alt+T` o pulsante `⟳ Squadra`) da schermata elenco Pokemon: OCR nome per ciascuno dei 6 slot con fuzzy match, livello letto cifra per cifra da `vision/level_reader.py`, sovrascrive `state.team`. Guard doppia: prima `classify_screen` deve leggere il pulsante `ESCI` in basso a destra (schermata sbagliata → nessuna delle 12 OCR sugli slot parte), poi la lettura deve essere coerente — <3/6 slot leggibili o stesso pokemon_id in ≥2 slot → aggiornamento bloccato.
 - **Mappa nickname** (pulsante `🏷`): dialog per associare nickname custom (es. "FIAMMETTA") a un pokemon_id, usata sia dal riconoscimento squadra sia da quello del player in battaglia. Il nickname si scrive come appare nel gioco: il confronto è fuzzy e assorbe gli errori OCR. Persistita in `state.json`.
 - **OpponentPanel**: due card affiancate (player | avversario) con sprite Pokedex, nome, tipi, abilità e tabella efficacia difensiva colorata (Debolezze / Resistenze / Immune, neutri esclusi).
@@ -59,8 +59,6 @@ scripts/
   team_menu_debug.py         # overlay ROI menu squadra
   level_debug.py             # OCR debug su ROI level dedicate
   ocr_debug_team.py          # OCR debug su ROI slot squadra
-  icon_compare.py            # confronto pHash icone reference vs capture
-  icon_debug.py              # top-K pHash icone per debug
   recognize_test.py          # end-to-end recognize opponent
   recognize_team_test.py     # end-to-end recognize squadra
   battle_watch_debug.py      # eventi F4 (ENTERED/LEFT/CHANGED) senza GUI
@@ -104,10 +102,10 @@ Ogni `scripts/*_debug.py` presume mGBA aperto. Produce PNG diagnostici sotto `da
 ## 6. Limitazioni note (da PLAN §7)
 
 - **Livello non mostrato con alterazione di stato**: se il Pokemon è avvelenato/paralizzato/ecc. il gioco disegna il badge di stato al posto di `L.XX`. `read_level` ritorna `None` e lo slot conserva il livello precedente, editabile via `…`. (La lettura del livello in sé è risolta: vedi `vision/level_reader.py`.)
-- **Match icona menu Pokemon**: pHash/dhash rumorosi anche col color-key HSV. Oggi conta poco: l'OCR nome rec-only riconosce tutti gli slot, quindi il fallback icona non viene quasi mai raggiunto.
+- **Match icona menu Pokemon**: rimosso. La confidenza era `1 - distanza/18` e le distanze reali stavano fra 16 e 24 anche sul match giusto — sempre sotto la soglia di 0.60 con cui la squadra viene scritta, quindi il canale non poteva cambiare nulla. Le righe `side='icon'` restano nel DB, non le legge più nessuno.
 - **Chrome mGBA**: non è più un numero fisso. `vision/chrome.py` misura la fascia sul frame catturato (titolo e menu bar sono righe grigie e chiare, le schermate di gioco sono sature) e i 52 px del layout restano il fallback. Con un tema scuro la misura non passa e si ripiega sul fallback: il nero è escluso di proposito, perché è anche il colore delle bande di letterbox.
 - **ROI hardcoded**: solo FRLG a scala mGBA. Quelle di combattimento sono state verificate su cattura live (le due del lato giocatore ricalibrate misurando i pixel). Calibratore visuale drag-a-rettangolo sbloccherebbe altri giochi. Parzialmente coperto da `extract_roi_from_annotated.py` (offline).
-- **pHash sprite in combattimento**: inservibile. La cattura ha campo e cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la specie corretta non entra nei primi tre a nessun offset di ROI (Weezing a distanza 20-24 mentre specie sbagliate stanno a 14-16). Il verdetto regge interamente sul nome.
+- **pHash sprite in combattimento**: rimosso. La cattura ha campo e cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la specie corretta non entrava nei primi tre a nessun offset di ROI (Weezing a distanza 20-24 mentre specie sbagliate stanno a 14-16). Lato avversario non superava mai la soglia; lato giocatore poteva perfino decidere da solo a OCR muta, con confidenza 0.70 sulla distanza minima, cioè quasi sempre la specie sbagliata. Il verdetto regge interamente sul nome. `PokemonRepository.find_pokemon_by_sprite_hash` resta, senza chiamanti: è la query che servirebbe se un giorno si segmentasse il soggetto dallo sfondo.
 - **Abilità ambigue**: molte specie ne ammettono più d'una e dallo sprite non si distinguono. Il filtro per generazione ne risolve circa metà in Gen 3, meno in Gen 5. Per il resto il pannello non applica nulla e segnala il dubbio, e l'abilità si fissa a mano dal menu sulla card.
 - **Abilità storiche**: veekun pubblica solo l'assegnazione corrente. `ABILITY_HISTORY_OVERRIDES` copre Gengar (che ha perso Levitazione in Gen 7); altri casi eventuali vanno aggiunti lì a mano.
 - **Ambiente**: F2/F3/F4 richiedono Windows nativo (COM + Windows Graphics Capture + hotkey Win32). Logica pura (`engine/`, `data/`) ovunque, anche WSL/Linux.
@@ -119,19 +117,21 @@ Ordinati per valore/costo. Tutte le fasi del piano (F0-F4) sono chiuse: da qui
 in poi sono estensioni, non completamento.
 
 1. **Calibratore ROI visuale**: dialog con canvas su screenshot, si disegnano
-   i rettangoli per (nome opp, sprite opp, HUD player, ecc.). È il
-   prerequisito pratico di qualunque nuovo gioco, e toglie di mezzo la
-   ricalibrazione a mano che in questo repo è già costata due bug. ~4-6h.
+   i rettangoli per (nome opp, barra HP opp, HUD player, sentinella ESCI,
+   6 nomi + 6 livelli del menu squadra: 16 in tutto). È il prerequisito
+   pratico di qualunque nuovo gioco, e toglie di mezzo la ricalibrazione a
+   mano che in questo repo è già costata due bug. ~7h.
 2. **Secondo gioco**: Cristallo (Gen 2 mGBA) o HeartGold (Gen 4
    melonDS/DeSmuME). Serve layout GB/GBC (160×144, aspect 10:9) o doppio
    schermo DS, ROI dedicate, `preferred_game`. Nota: in Gen 1-2 non esistono
    abilità, quindi quel layer semplicemente non si attiva.
 3. **Packaging Windows**: PyInstaller o installer, per non dipendere dal venv.
-4. **Segmentare lo sprite dallo sfondo**: il canale pHash in battaglia è
-   inservibile perché la cattura ha campo e cielo mentre le reference stanno
-   su bianco. I fondali di battaglia sono a bande piatte, quindi un flood-fill
-   dai bordi è plausibile. Recupererebbe il secondo segnale, oggi portato
-   interamente dal nome.
+4. **Segmentare lo sprite dallo sfondo**: il pHash in battaglia è stato
+   rimosso perché la cattura ha campo e cielo mentre le reference stanno su
+   bianco. I fondali di battaglia sono a bande piatte, quindi un flood-fill
+   dai bordi è plausibile. Rimetterebbe in piedi il secondo segnale, oggi
+   portato interamente dal nome — ma va rifatto insieme alle ROI sprite,
+   tolte anch'esse.
 
 ## 8. Convenzioni rapide
 

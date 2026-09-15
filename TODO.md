@@ -9,14 +9,16 @@ Convenzioni:
 
 ## In corso / parziale
 
-- `[~]` **F3.9 — match icona menu Pokemon**
-  Infra completa: schema `sprite_hashes.side='icon'`, indice Gen 1-5 da
-  `PokeAPI/sprites/versions/generation-{roman}/icons`, preprocessing HSV
-  color-key rimuove bg teal menu FRLG, fallback solo se OCR nome fallisce.
-  **Limite**: distanze pHash/dhash ≥ 16-24 anche su match corretto →
-  inaffidabile. Testato capture live FRLG.
-  Prossimo: template matching diretto su icone note (per game) o pre-crop
-  più aggressivo riquadro icona (rimuovere anche Pokeball sinistra).
+- `[x]` **F3.9 — match icona menu Pokemon: rimosso.**
+  L'infra c'era tutta (schema `sprite_hashes.side='icon'`, indice Gen 1-5,
+  color-key HSV sul teal del menu), ma i numeri non tornavano: confidenza
+  `1 - distanza/18` contro distanze reali 16-24 anche sul match giusto, cioè
+  ≤ 0.11 contro la soglia di 0.60 con cui la squadra viene scritta. Non era
+  inaffidabile, era **inerte**: non poteva cambiare nulla in nessun caso.
+  Tolti il fallback, le 6 ROI `slot_icons` e gli script `icon_debug.py` /
+  `icon_compare.py`. Le righe `side='icon'` restano nel DB (costano solo
+  disco) e `build_sprite_index.py` continua a scriverle: rifare l'indice
+  costa un clone da 500 MB, non vale il risparmio.
 
 - `[x]` **F3.10 — detection livello `L.XX` team menu** (commit `ebc7a58`).
   Risolto senza template matching. `vision/level_reader.py` binarizza,
@@ -69,13 +71,21 @@ Convenzioni:
   **rimossa**: nessun codice la leggeva, solo l'overlay diagnostico la
   disegnava. Era un rettangolo da tarare per ogni gioco nuovo, a vuoto.
 
-- `[!]` **pHash sprite inutilizzabile in battaglia**. La cattura ha campo e
-  cielo dietro il Pokemon, le reference indicizzate stanno su bianco: la
-  specie corretta non entra nei primi 3 a nessun offset di ROI (Weezing a
-  distanza 20-24 mentre specie sbagliate stanno a 14-16). Il verdetto regge
-  interamente sul nome. Per recuperare il canale servirebbe segmentare il
-  soggetto dallo sfondo prima del hash (il fondo di battaglia è a bande di
-  colore piatte, quindi un flood-fill dai bordi è plausibile).
+- `[x]` **pHash sprite in battaglia: rimosso.** La cattura ha campo e cielo
+  dietro il Pokemon, le reference indicizzate stanno su bianco: la specie
+  corretta non entrava nei primi 3 a nessun offset di ROI (Weezing a distanza
+  20-24 mentre specie sbagliate stanno a 14-16). Lato avversario la soglia 12
+  non veniva mai raggiunta, quindi era solo costo. Lato giocatore era peggio:
+  col match ristretto ai 6 di squadra, a OCR muta `_combine` cadeva sul ramo
+  solo-sprite e ritornava la **distanza minima** con confidenza 0.70, sopra la
+  soglia di applicazione — cioè evidenziava con sicurezza lo slot sbagliato.
+  Tolte anche le ROI `opponent_sprite` e `player_sprite`.
+  Per recuperare il canale servirebbe segmentare il soggetto dallo sfondo
+  prima del hash (il fondo di battaglia è a bande di colore piatte, quindi un
+  flood-fill dai bordi è plausibile), e rifare le due ROI.
+  Nota: `PokemonRepository.find_pokemon_by_sprite_hash` è rimasta senza
+  chiamanti di produzione. Tenuta apposta — è la query che servirebbe al
+  ritorno del canale, ed è coperta dai test di `data/`.
 
 - `[ ]` **PS del giocatore via OCR** (idea, non pianificata). Oggi nessun
   valore PS viene letto: `opponent_hp_bar` serve solo a `screen_mode` per
@@ -138,9 +148,9 @@ Convenzioni:
 - `[ ]` **Verifica ROI battaglia + team menu su risoluzione emulatore
   odierna**. Utente disegnerà a colori 3 aree per capture di riferimento
   (nome/pokemon/livello), poi confronto con `ROIS_FIRERED`. Serve:
-  - definire 3 colori distinti + visibili (proposta: `#FF00FF` magenta
-    per nome, `#00FFFF` ciano per sprite/icona, `#FFFF00` giallo per
-    livello);
+  - definire 2 colori distinti + visibili (`#FF00FF` magenta per nome,
+    `#FFFF00` giallo per livello; il ciano delle icone è decaduto con il
+    fallback pHash);
   - script snap che accetta un PNG annotato dall'utente ed estrae
     bounding box per colore → normalizza in coord `Roi` (0..1 su game
     area);
