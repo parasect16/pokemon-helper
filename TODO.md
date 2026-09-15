@@ -98,9 +98,32 @@ Convenzioni:
   nuova sui numeri PS dell'HUD (y nativa 95-99 in FRLG, misurata quando
   `player_hp_bar` ci cadeva sopra per errore).
 
-- `[ ]` **Calibratore ROI visuale** (~4-6h). Dialog con canvas su screenshot,
-  utente disegna rettangoli per (nome opp, sprite opp, HUD player, ecc.).
-  Sblocca giochi non supportati senza toccare codice.
+- `[~]` **Calibratore ROI visuale** (~7h stimate, 16 rettangoli da disegnare).
+  Dialog con canvas su screenshot, utente disegna i rettangoli. Sblocca giochi
+  non supportati senza toccare codice.
+  - `[x]` **1.1 persistenza** — `vision/roi_store.py`: JSON per gioco in
+    `%APPDATA%\pokemon-helper
+ois\<gioco>.json`, `RoiStore` load/save/clear,
+    `resolve_rois(game)` = default del repo + override utente. Lettura
+    tutto-o-niente: un file rotto o con un rettangolo fuori range torna ai
+    default con un avviso, perché applicarne metà darebbe ROI che non sono né
+    quelle dell'utente né quelle del repo. 25 test.
+  - `[x]` **1.2 chiamanti** — `ui.app` e gli otto script di debug passano da
+    `resolve_rois` invece di leggere `GAME_ROIS`. In `app` il risultato è in
+    cache per sessione: il poll F4 gira due volte al secondo e non deve
+    rileggere il disco a ogni giro (il calibratore invaliderà la cache).
+  - `[ ]` **1.3 dialog di disegno** — canvas, rubber-band, snap alla griglia
+    nativa 240x160, zoom, nudge con le frecce.
+  - `[ ]` **1.4 cattura per gruppo** — le ROI di battaglia si calibrano su un
+    frame di battaglia, quelle del menu su un frame di menu; `classify_screen`
+    dice quale delle due si sta guardando.
+  - `[ ]` **1.5 read-back dal vivo** — per ogni rettangolo disegnato, cosa ci
+    legge l'OCR. È la parte che ripaga: i due bug di calibrazione passati non
+    erano rettangoli storti a vedersi, erano rettangoli che leggevano altro.
+  - `[ ]` **1.6 salva / ripristina / esporta** — export di uno snippet Python
+    per `roi.py`, così una calibrazione buona può diventare il default del
+    repo invece di restare su una macchina.
+  - `[ ]` **1.7 aggancio UI + docs**.
 - `[ ]` **Supporto Pokemon Cristallo** (Gen 2 mGBA). Nuove ROI, layout GB/GBC
   (160×144, aspect 10:9), aggiungere `LAYOUT_MGBA_GB` in `_GAME_BY_GENERATION`.
 - `[x]` **Test UI** con `pytest-qt`. Coverage `ui/` da 0 a 65%: pannelli,

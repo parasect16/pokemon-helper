@@ -21,14 +21,15 @@ from pokemon_helper.data import PokemonRepository
 from pokemon_helper.vision.capture import WindowCapture
 from pokemon_helper.vision.ocr import OcrEngine
 from pokemon_helper.vision.recognizer import Recognizer
-from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
+from pokemon_helper.vision.roi import compute_game_area, roi_to_pixels
+from pokemon_helper.vision.roi_store import resolve_rois
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "pokemon.sqlite"
 
 
 def main() -> int:
-    layout, rois = GAME_ROIS["firered"]
+    layout, rois = resolve_rois("firered")
     cap = WindowCapture("mGBA")
     frame = cap.capture_frame()
     ga = compute_game_area(frame.width, frame.height, layout)

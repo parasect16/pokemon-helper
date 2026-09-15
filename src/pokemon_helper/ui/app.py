@@ -362,11 +362,25 @@ def _init_recognize_hotkey(
         from pokemon_helper.vision.chrome import resolve_layout
         from pokemon_helper.vision.ocr import OcrEngine
         from pokemon_helper.vision.recognizer import Recognizer
-        from pokemon_helper.vision.roi import GAME_ROIS, compute_game_area, roi_to_pixels
+        from pokemon_helper.vision.roi import compute_game_area, roi_to_pixels
+        from pokemon_helper.vision.roi_store import RoiStore, resolve_rois
         from pokemon_helper.vision.screen_mode import ScreenMode, classify_screen
     except ImportError as exc:
         print(f"[vision] deps non installate, riconoscimento disabilitato: {exc}")
         return None
+
+    # Le ROI effettive sono i default del repo più l'eventuale calibrazione
+    # dell'utente. Il resolver legge un file, quindi il risultato si tiene in
+    # cache: `probe` gira due volte al secondo e non deve rileggere il disco
+    # a ogni giro. Quando il calibratore salverà, sarà lui a invalidarla.
+    roi_store = RoiStore()
+    resolved_rois: dict[str, tuple] = {}
+
+    def rois_for(game_key: str) -> tuple:
+        """Layout e ROI del gioco, risolti una volta sola per sessione."""
+        if game_key not in resolved_rois:
+            resolved_rois[game_key] = resolve_rois(game_key, roi_store)
+        return resolved_rois[game_key]
 
     capture = WindowCapture("mGBA")
     # Istanza singola condivisa. Warm-up eseguito in background per evitare
@@ -409,7 +423,7 @@ def _init_recognize_hotkey(
             if game_key is None:
                 bridge.opponent_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
-            layout, rois = GAME_ROIS[game_key]
+            layout, rois = rois_for(game_key)
             # L'app si sta chiudendo: non aprire una cattura che nessuno
             # aspetta più. Il controllo si ripete dopo ogni fase lunga.
             if worker.cancelled:
@@ -481,7 +495,7 @@ def _init_recognize_hotkey(
             if game_key is None:
                 bridge.team_failed.emit(f"nessun gioco supportato per Gen {state.generation}")
                 return
-            layout, rois = GAME_ROIS[game_key]
+            layout, rois = rois_for(game_key)
             if worker.cancelled:
                 return
             frame = capture.capture_frame(timeout_seconds=3.0)
@@ -566,7 +580,7 @@ def _init_recognize_hotkey(
         game_key = _GAME_BY_GENERATION.get(state.generation)
         if game_key is None:
             return False, None
-        layout, rois = GAME_ROIS[game_key]
+        layout, rois = rois_for(game_key)
         try:
             frame = capture.capture_frame(timeout_seconds=3.0).image
         except CaptureError, TimeoutError:

@@ -32,10 +32,10 @@ from pokemon_helper.vision.battle_watcher import BattleWatcher  # noqa: E402
 from pokemon_helper.vision.capture import CaptureError, WindowCapture  # noqa: E402
 from pokemon_helper.vision.ocr import OcrEngine  # noqa: E402
 from pokemon_helper.vision.roi import (  # noqa: E402
-    GAME_ROIS,
     compute_game_area,
     roi_to_pixels,
 )
+from pokemon_helper.vision.roi_store import resolve_rois  # noqa: E402
 from pokemon_helper.vision.screen_mode import ScreenMode, classify_screen  # noqa: E402
 
 GAME = "firered"
@@ -45,7 +45,7 @@ def main() -> int:
     duration = float(sys.argv[1]) if len(sys.argv) > 1 else 30.0
     interval = (float(sys.argv[2]) if len(sys.argv) > 2 else 500.0) / 1000.0
 
-    layout, rois = GAME_ROIS[GAME]
+    layout, rois = resolve_rois(GAME)
     capture = WindowCapture("mGBA")
     watcher = BattleWatcher()
     ocr = OcrEngine()

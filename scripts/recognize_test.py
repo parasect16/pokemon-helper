@@ -24,6 +24,7 @@ from pokemon_helper.vision.capture import CaptureError, WindowCapture
 from pokemon_helper.vision.ocr import OcrEngine
 from pokemon_helper.vision.recognizer import Recognizer
 from pokemon_helper.vision.roi import GAME_ROIS
+from pokemon_helper.vision.roi_store import resolve_rois
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "data" / "pokemon.sqlite"
@@ -40,7 +41,7 @@ def main() -> int:
         print(f"ERROR: gioco '{game}' non supportato", file=sys.stderr)
         return 2
 
-    layout, rois = GAME_ROIS[game]
+    layout, rois = resolve_rois(game)
     generation = GAME_GENERATION[game]
 
     capture = WindowCapture("mGBA")
